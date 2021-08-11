@@ -7,6 +7,7 @@ import * as alert_words from "./alert_words";
 import * as blueslip from "./blueslip";
 import * as channel from "./channel";
 import * as favicon from "./favicon";
+import * as hash_util from "./hash_util";
 import {$t} from "./i18n";
 import * as message_lists from "./message_lists";
 import * as message_store from "./message_store";
@@ -23,6 +24,7 @@ import * as stream_ui_updates from "./stream_ui_updates";
 import * as ui from "./ui";
 import * as unread from "./unread";
 import * as unread_ops from "./unread_ops";
+import {user_settings} from "./user_settings";
 
 const notice_memory = new Map();
 
@@ -91,7 +93,7 @@ export function initialize() {
 }
 
 function update_notification_sound_source() {
-    const notification_sound = page_params.notification_sound;
+    const notification_sound = user_settings.notification_sound;
     const audio_file_without_extension = "/static/audio/notification_sounds/" + notification_sound;
     $("#notification-sound-source-ogg").attr("src", `${audio_file_without_extension}.ogg`);
     $("#notification-sound-source-mp3").attr("src", `${audio_file_without_extension}.mp3`);
@@ -153,11 +155,18 @@ export function is_window_focused() {
     return window_focused;
 }
 
-export function notify_above_composebox(note, link_class, link_msg_id, link_text) {
+export function notify_above_composebox(
+    note,
+    link_class,
+    above_composebox_narrow_url,
+    link_msg_id,
+    link_text,
+) {
     const notification_html = $(
         render_compose_notification({
             note,
             link_class,
+            above_composebox_narrow_url,
             link_msg_id,
             link_text,
         }),
@@ -233,8 +242,8 @@ export function process_notification(notification) {
 
     if (message.type === "private" || message.type === "test-notification") {
         if (
-            page_params.pm_content_in_desktop_notifications !== undefined &&
-            !page_params.pm_content_in_desktop_notifications
+            user_settings.pm_content_in_desktop_notifications !== undefined &&
+            !user_settings.pm_content_in_desktop_notifications
         ) {
             content = "New private message from " + message.sender_full_name;
         }
@@ -390,7 +399,7 @@ export function should_send_desktop_notification(message) {
 
     // enable_desktop_notifications determines whether we pop up a
     // notification for PMs/mentions/alerts
-    if (!page_params.enable_desktop_notifications) {
+    if (!user_settings.enable_desktop_notifications) {
         return false;
     }
 
@@ -422,7 +431,7 @@ export function should_send_desktop_notification(message) {
 export function should_send_audible_notification(message) {
     // If `None` is selected as the notification sound, never send
     // audible notifications regardless of other configuration.
-    if (page_params.notification_sound === "none") {
+    if (user_settings.notification_sound === "none") {
         return false;
     }
 
@@ -436,7 +445,7 @@ export function should_send_audible_notification(message) {
     }
 
     // enable_sounds determines whether we ding for PMs/mentions/alerts
-    if (!page_params.enable_sounds) {
+    if (!user_settings.enable_sounds) {
         return false;
     }
 
@@ -599,10 +608,12 @@ export function notify_local_mixes(messages, need_user_to_scroll) {
 
         let reason = get_local_notify_mix_reason(message);
 
+        const above_composebox_narrow_url = get_above_composebox_narrow_url(message);
+
         if (!reason) {
             if (need_user_to_scroll) {
                 reason = $t({defaultMessage: "Sent! Scroll down to view your message."});
-                notify_above_composebox(reason, "", null, "");
+                notify_above_composebox(reason, "", above_composebox_narrow_url, null, "");
                 setTimeout(() => {
                     $("#out-of-view-notification").hide();
                 }, 3000);
@@ -620,8 +631,27 @@ export function notify_local_mixes(messages, need_user_to_scroll) {
             {message_recipient: get_message_header(message)},
         );
 
-        notify_above_composebox(reason, link_class, link_msg_id, link_text);
+        notify_above_composebox(
+            reason,
+            link_class,
+            above_composebox_narrow_url,
+            link_msg_id,
+            link_text,
+        );
     }
+}
+
+function get_above_composebox_narrow_url(message) {
+    let above_composebox_narrow_url;
+    if (message.type === "stream") {
+        above_composebox_narrow_url = hash_util.by_stream_topic_uri(
+            message.stream_id,
+            message.topic,
+        );
+    } else {
+        above_composebox_narrow_url = message.pm_with_url;
+    }
+    return above_composebox_narrow_url;
 }
 
 // for callback when we have to check with the server if a message should be in
@@ -631,6 +661,7 @@ export function notify_messages_outside_current_search(messages) {
         if (!people.is_current_user(message.sender_email)) {
             continue;
         }
+        const above_composebox_narrow_url = get_above_composebox_narrow_url(message);
         const link_text = $t(
             {defaultMessage: "Narrow to {message_recipient}"},
             {message_recipient: get_message_header(message)},
@@ -638,6 +669,7 @@ export function notify_messages_outside_current_search(messages) {
         notify_above_composebox(
             $t({defaultMessage: "Sent! Your recent message is outside the current search."}),
             "compose_notification_narrow_by_topic",
+            above_composebox_narrow_url,
             message.id,
             link_text,
         );
@@ -692,7 +724,7 @@ export function handle_global_notification_updates(notification_name, setting) {
     // for a given message. These settings do not affect whether or not a
     // particular stream should receive notifications.
     if (settings_config.all_notification_settings.includes(notification_name)) {
-        page_params[notification_name] = setting;
+        user_settings[notification_name] = setting;
     }
 
     if (settings_config.stream_notification_settings.includes(notification_name)) {

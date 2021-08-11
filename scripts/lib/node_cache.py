@@ -34,11 +34,11 @@ def generate_sha1sum_node_modules(
     PACKAGE_JSON_FILE_PATH = os.path.join(setup_dir, "package.json")
     YARN_LOCK_FILE_PATH = os.path.join(setup_dir, "yarn.lock")
     data: Dict[str, object] = {}
-    with open(PACKAGE_JSON_FILE_PATH, "r") as f:
+    with open(PACKAGE_JSON_FILE_PATH) as f:
         data[PACKAGE_JSON_FILE_PATH] = f.read().strip()
     if os.path.exists(YARN_LOCK_FILE_PATH):
         # For backwards compatibility, we can't assume yarn.lock exists
-        with open(YARN_LOCK_FILE_PATH, "r") as f:
+        with open(YARN_LOCK_FILE_PATH) as f:
             data[YARN_LOCK_FILE_PATH] = f.read().strip()
     with open(YARN_PACKAGE_JSON) as f:
         data["yarn-package-version"] = json.load(f)["version"]
@@ -48,7 +48,7 @@ def generate_sha1sum_node_modules(
     data["yarn-args"] = get_yarn_args(production=production)
 
     sha1sum = hashlib.sha1()
-    sha1sum.update(json.dumps(data, sort_keys=True).encode("utf-8"))
+    sha1sum.update(json.dumps(data, sort_keys=True).encode())
     return sha1sum.hexdigest()
 
 
@@ -67,7 +67,7 @@ def setup_node_modules(
     if not os.path.exists(success_stamp):
         do_yarn_install(target_path, yarn_args, success_stamp)
 
-    print("Using cached node modules from {}".format(cached_node_modules))
+    print(f"Using cached node modules from {cached_node_modules}")
     if os.path.islink("node_modules"):
         os.remove("node_modules")
     elif os.path.isdir("node_modules"):

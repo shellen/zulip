@@ -2,27 +2,32 @@ import logging
 import random
 import threading
 import time
+from abc import ABCMeta, abstractmethod
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set
+from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Set, TypeVar, Union
 
 import orjson
 import pika
 import pika.adapters.tornado_connection
+import pika.connection
+import pika.exceptions
 from django.conf import settings
 from pika.adapters.blocking_connection import BlockingChannel
+from pika.channel import Channel
 from pika.spec import Basic
 from tornado import ioloop
 
 from zerver.lib.utils import statsd
 
 MAX_REQUEST_RETRIES = 3
-Consumer = Callable[[BlockingChannel, Basic.Deliver, pika.BasicProperties, bytes], None]
+ChannelT = TypeVar("ChannelT", Channel, BlockingChannel)
+Consumer = Callable[[ChannelT, Basic.Deliver, pika.BasicProperties, bytes], None]
 
 # This simple queuing library doesn't expose much of the power of
 # rabbitmq/pika's queuing system; its purpose is to just provide an
 # interface for external files to put things into queues and take them
 # out from bots without having to import pika code all over our codebase.
-class SimpleQueueClient:
+class QueueClient(Generic[ChannelT], metaclass=ABCMeta):
     def __init__(
         self,
         # Disable RabbitMQ heartbeats by default because BlockingConnection can't process them
@@ -30,23 +35,19 @@ class SimpleQueueClient:
     ) -> None:
         self.log = logging.getLogger("zulip.queue")
         self.queues: Set[str] = set()
-        self.channel: Optional[BlockingChannel] = None
-        self.consumers: Dict[str, Set[Consumer]] = defaultdict(set)
+        self.channel: Optional[ChannelT] = None
+        self.consumers: Dict[str, Set[Consumer[ChannelT]]] = defaultdict(set)
         self.rabbitmq_heartbeat = rabbitmq_heartbeat
         self.is_consuming = False
         self._connect()
 
+    @abstractmethod
     def _connect(self) -> None:
-        start = time.time()
-        self.connection = pika.BlockingConnection(self._get_parameters())
-        self.channel = self.connection.channel()
-        self.log.info(f"SimpleQueueClient connected (connecting took {time.time() - start:.3f}s)")
+        raise NotImplementedError
 
+    @abstractmethod
     def _reconnect(self) -> None:
-        self.connection = None
-        self.channel = None
-        self.queues = set()
-        self._connect()
+        raise NotImplementedError
 
     def _get_parameters(self) -> pika.ConnectionParameters:
         credentials = pika.PlainCredentials(settings.RABBITMQ_USERNAME, settings.RABBITMQ_PASSWORD)
@@ -81,7 +82,7 @@ class SimpleQueueClient:
     def _generate_ctag(self, queue_name: str) -> str:
         return f"{queue_name}_{str(random.getrandbits(16))}"
 
-    def _reconnect_consumer_callback(self, queue: str, consumer: Consumer) -> None:
+    def _reconnect_consumer_callback(self, queue: str, consumer: Consumer[ChannelT]) -> None:
         self.log.info(f"Queue reconnecting saved consumer {consumer} to queue {queue}")
         self.ensure_queue(
             queue,
@@ -97,27 +98,15 @@ class SimpleQueueClient:
             for consumer in consumers:
                 self._reconnect_consumer_callback(queue, consumer)
 
-    def close(self) -> None:
-        if self.connection:
-            self.connection.close()
-
     def ready(self) -> bool:
         return self.channel is not None
 
-    def ensure_queue(self, queue_name: str, callback: Callable[[BlockingChannel], None]) -> None:
-        """Ensure that a given queue has been declared, and then call
-        the callback with no arguments."""
-        if self.connection is None or not self.connection.is_open:
-            self._connect()
-
-        assert self.channel is not None
-        if queue_name not in self.queues:
-            self.channel.queue_declare(queue=queue_name, durable=True)
-            self.queues.add(queue_name)
-        callback(self.channel)
+    @abstractmethod
+    def ensure_queue(self, queue_name: str, callback: Callable[[ChannelT], object]) -> None:
+        raise NotImplementedError
 
     def publish(self, queue_name: str, body: bytes) -> None:
-        def do_publish(channel: BlockingChannel) -> None:
+        def do_publish(channel: ChannelT) -> None:
             channel.basic_publish(
                 exchange="",
                 routing_key=queue_name,
@@ -139,6 +128,38 @@ class SimpleQueueClient:
 
         self._reconnect()
         self.publish(queue_name, data)
+
+
+class SimpleQueueClient(QueueClient[BlockingChannel]):
+    connection: Optional[pika.BlockingConnection]
+
+    def _connect(self) -> None:
+        start = time.time()
+        self.connection = pika.BlockingConnection(self._get_parameters())
+        self.channel = self.connection.channel()
+        self.log.info(f"SimpleQueueClient connected (connecting took {time.time() - start:.3f}s)")
+
+    def _reconnect(self) -> None:
+        self.connection = None
+        self.channel = None
+        self.queues = set()
+        self._connect()
+
+    def close(self) -> None:
+        if self.connection is not None:
+            self.connection.close()
+
+    def ensure_queue(self, queue_name: str, callback: Callable[[BlockingChannel], object]) -> None:
+        """Ensure that a given queue has been declared, and then call
+        the callback with no arguments."""
+        if self.connection is None or not self.connection.is_open:
+            self._connect()
+
+        assert self.channel is not None
+        if queue_name not in self.queues:
+            self.channel.queue_declare(queue=queue_name, durable=True)
+            self.queues.add(queue_name)
+        callback(self.channel)
 
     def start_json_consumer(
         self,
@@ -164,11 +185,13 @@ class SimpleQueueClient:
             # batch of events it has.
             for method, properties, body in channel.consume(queue_name, inactivity_timeout=timeout):
                 if body is not None:
+                    assert method is not None
                     events.append(orjson.loads(body))
                     max_processed = method.delivery_tag
                 now = time.time()
                 if len(events) >= batch_size or (timeout and now >= last_process + timeout):
                     if events:
+                        assert max_processed is not None
                         try:
                             callback(events)
                             channel.basic_ack(max_processed, multiple=True)
@@ -184,7 +207,9 @@ class SimpleQueueClient:
 
     def local_queue_size(self) -> int:
         assert self.channel is not None
-        return self.channel.get_waiting_message_count() + len(self.channel._pending_events)
+        return self.channel.get_waiting_message_count() + len(
+            self.channel._pending_events  # type: ignore[attr-defined] # private member missing from stubs
+        )
 
     def stop_consuming(self) -> None:
         assert self.channel is not None
@@ -199,7 +224,7 @@ class SimpleQueueClient:
 class ExceptionFreeTornadoConnection(pika.adapters.tornado_connection.TornadoConnection):
     def _adapter_disconnect(self) -> None:
         try:
-            super()._adapter_disconnect()
+            super()._adapter_disconnect()  # type: ignore[misc]  # private method missing from stubs
         except (
             pika.exceptions.ProbableAuthenticationError,
             pika.exceptions.ProbableAccessDeniedError,
@@ -212,7 +237,9 @@ calling _adapter_disconnect, ignoring",
             )
 
 
-class TornadoQueueClient(SimpleQueueClient):
+class TornadoQueueClient(QueueClient[Channel]):
+    connection: Optional[ExceptionFreeTornadoConnection]
+
     # Based on:
     # https://pika.readthedocs.io/en/0.9.8/examples/asynchronous_consumer_example.html
     def __init__(self) -> None:
@@ -220,7 +247,7 @@ class TornadoQueueClient(SimpleQueueClient):
             # TornadoConnection can process heartbeats, so enable them.
             rabbitmq_heartbeat=None
         )
-        self._on_open_cbs: List[Callable[[BlockingChannel], None]] = []
+        self._on_open_cbs: List[Callable[[Channel], None]] = []
         self._connection_failure_count = 0
 
     def _connect(self) -> None:
@@ -254,7 +281,7 @@ class TornadoQueueClient(SimpleQueueClient):
     CONNECTION_FAILURES_BEFORE_NOTIFY = 10
 
     def _on_connection_open_error(
-        self, connection: pika.connection.Connection, reason: Exception
+        self, connection: pika.connection.Connection, reason: Union[str, Exception]
     ) -> None:
         self._connection_failure_count += 1
         retry_secs = self.CONNECTION_RETRY_SECS
@@ -279,6 +306,7 @@ class TornadoQueueClient(SimpleQueueClient):
         ioloop.IOLoop.instance().call_later(retry_secs, self._reconnect)
 
     def _on_open(self, connection: pika.connection.Connection) -> None:
+        assert self.connection is not None
         self._connection_failure_count = 0
         try:
             self.connection.channel(on_open_callback=self._on_channel_open)
@@ -287,14 +315,18 @@ class TornadoQueueClient(SimpleQueueClient):
             # Let _on_connection_closed deal with trying again.
             self.log.warning("TornadoQueueClient couldn't open channel: connection already closed")
 
-    def _on_channel_open(self, channel: BlockingChannel) -> None:
+    def _on_channel_open(self, channel: Channel) -> None:
         self.channel = channel
         for callback in self._on_open_cbs:
             callback(channel)
         self._reconnect_consumer_callbacks()
         self.log.info("TornadoQueueClient connected")
 
-    def ensure_queue(self, queue_name: str, callback: Callable[[BlockingChannel], None]) -> None:
+    def close(self) -> None:
+        if self.connection is not None:
+            self.connection.close()
+
+    def ensure_queue(self, queue_name: str, callback: Callable[[Channel], object]) -> None:
         def finish(frame: Any) -> None:
             assert self.channel is not None
             self.queues.add(queue_name)
@@ -321,11 +353,12 @@ class TornadoQueueClient(SimpleQueueClient):
         timeout: Optional[int] = None,
     ) -> None:
         def wrapped_consumer(
-            ch: BlockingChannel,
+            ch: Channel,
             method: Basic.Deliver,
             properties: pika.BasicProperties,
             body: bytes,
         ) -> None:
+            assert method.delivery_tag is not None
             callback([orjson.loads(body)])
             ch.basic_ack(delivery_tag=method.delivery_tag)
 
@@ -346,10 +379,10 @@ class TornadoQueueClient(SimpleQueueClient):
         )
 
 
-queue_client: Optional[SimpleQueueClient] = None
+queue_client: Optional[Union[SimpleQueueClient, TornadoQueueClient]] = None
 
 
-def get_queue_client() -> SimpleQueueClient:
+def get_queue_client() -> Union[SimpleQueueClient, TornadoQueueClient]:
     global queue_client
     if queue_client is None:
         if settings.RUNNING_INSIDE_TORNADO and settings.USING_RABBITMQ:

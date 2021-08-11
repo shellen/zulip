@@ -45,7 +45,6 @@ class HomeTest(ZulipTestCase):
     expected_page_params_keys = [
         "alert_words",
         "apps_page_url",
-        "available_notification_sounds",
         "avatar_source",
         "avatar_url",
         "avatar_url_medium",
@@ -53,46 +52,21 @@ class HomeTest(ZulipTestCase):
         "can_create_streams",
         "can_invite_others_to_realm",
         "can_subscribe_other_users",
-        "color_scheme",
         "corporate_enabled",
         "cross_realm_bots",
         "custom_profile_field_types",
         "custom_profile_fields",
-        "default_language",
-        "default_view",
         "delivery_email",
-        "demote_inactive_streams",
-        "dense_mode",
-        "desktop_icon_count_display",
         "development_environment",
         "drafts",
         "email",
-        "email_notifications_batching_period_seconds",
-        "emojiset",
-        "emojiset_choices",
-        "enable_desktop_notifications",
-        "enable_digest_emails",
-        "enable_drafts_synchronization",
-        "enable_login_emails",
-        "enable_marketing_emails",
-        "enable_offline_email_notifications",
-        "enable_offline_push_notifications",
-        "enable_online_push_notifications",
-        "enable_sounds",
-        "enable_stream_audible_notifications",
-        "enable_stream_desktop_notifications",
-        "enable_stream_email_notifications",
-        "enable_stream_push_notifications",
-        "enter_sends",
         "event_queue_longpoll_timeout_seconds",
         "first_in_realm",
-        "fluid_layout_width",
         "full_name",
         "furthest_read_time",
         "giphy_api_key",
         "giphy_rating_options",
         "has_zoom_token",
-        "high_contrast_mode",
         "hotspots",
         "insecure_desktop_app",
         "is_admin",
@@ -104,7 +78,6 @@ class HomeTest(ZulipTestCase):
         "jitsi_server_url",
         "language_list",
         "last_event_id",
-        "left_side_userlist",
         "login_page",
         "max_avatar_file_size_mib",
         "max_file_upload_size_mib",
@@ -115,7 +88,6 @@ class HomeTest(ZulipTestCase):
         "max_stream_description_length",
         "max_stream_name_length",
         "max_topic_length",
-        "message_content_in_email_notifications",
         "muted_topics",
         "muted_users",
         "narrow",
@@ -123,11 +95,8 @@ class HomeTest(ZulipTestCase):
         "needs_tutorial",
         "never_subscribed",
         "no_event_queue",
-        "notification_sound",
         "password_min_guesses",
         "password_min_length",
-        "pm_content_in_desktop_notifications",
-        "presence_enabled",
         "presences",
         "promote_sponsoring_zulip",
         "prompt_for_invites",
@@ -184,7 +153,6 @@ class HomeTest(ZulipTestCase):
         "realm_move_messages_between_streams_policy",
         "realm_name",
         "realm_name_changes_disabled",
-        "realm_name_in_notifications",
         "realm_night_logo_source",
         "realm_night_logo_url",
         "realm_non_active_users",
@@ -219,25 +187,21 @@ class HomeTest(ZulipTestCase):
         "show_billing",
         "show_plans",
         "show_webathena",
-        "starred_message_counts",
         "starred_messages",
         "stop_words",
         "subscriptions",
         "test_suite",
-        "timezone",
-        "translate_emoticons",
         "translation_data",
-        "twenty_four_hour_time",
         "two_fa_enabled",
         "two_fa_enabled_user",
         "unread_msgs",
         "unsubscribed",
         "upgrade_text_for_wide_organization_logo",
         "user_id",
+        "user_settings",
         "user_status",
         "warn_no_email",
         "webpack_public_path",
-        "wildcard_mentions_notify",
         "zulip_feature_level",
         "zulip_merge_base",
         "zulip_plan_is_not_limited",
@@ -276,7 +240,7 @@ class HomeTest(ZulipTestCase):
         self.assert_length(queries, 43)
         self.assert_length(cache_mock.call_args_list, 5)
 
-        html = result.content.decode("utf-8")
+        html = result.content.decode()
 
         for html_bit in html_bits:
             if html_bit not in html:
@@ -387,7 +351,7 @@ class HomeTest(ZulipTestCase):
         self.assert_length(queries2, 38)
 
         # Do a sanity check that our new streams were in the payload.
-        html = result.content.decode("utf-8")
+        html = result.content.decode()
         self.assertIn("test_stream_7", html)
 
     def _get_home_page(self, **kwargs: Any) -> HttpResponse:
@@ -402,7 +366,7 @@ class HomeTest(ZulipTestCase):
         Use this for tests that are geared toward specific edge cases, but
         which still want the home page to load properly.
         """
-        html = result.content.decode("utf-8")
+        html = result.content.decode()
         if "start a conversation" not in html:
             raise AssertionError("Home page probably did not load.")
 
@@ -418,7 +382,7 @@ class HomeTest(ZulipTestCase):
 
                 result = self.client_get("/", dict(stream="Denmark"))
 
-            html = result.content.decode("utf-8")
+            html = result.content.decode()
             self.assertIn("Accept the new Terms of Service", html)
 
     def test_banned_desktop_app_versions(self) -> None:
@@ -426,7 +390,7 @@ class HomeTest(ZulipTestCase):
         self.login_user(user)
 
         result = self.client_get("/", HTTP_USER_AGENT="ZulipElectron/2.3.82")
-        html = result.content.decode("utf-8")
+        html = result.content.decode()
         self.assertIn("You are using old version of the Zulip desktop", html)
 
     def test_unsupported_browser(self) -> None:
@@ -441,7 +405,7 @@ class HomeTest(ZulipTestCase):
         ]
         for user_agent in unsupported_user_agents:
             result = self.client_get("/", HTTP_USER_AGENT=user_agent)
-            html = result.content.decode("utf-8")
+            html = result.content.decode()
             self.assertIn("Internet Explorer is not supported by Zulip.", html)
 
     def test_terms_of_service_first_time_template(self) -> None:
@@ -481,7 +445,7 @@ class HomeTest(ZulipTestCase):
         self.login("hamlet")
         result = self._get_home_page(stream="Denmark", topic="lunch")
         self._sanity_check(result)
-        html = result.content.decode("utf-8")
+        html = result.content.decode()
         self.assertIn("lunch", html)
         self.assertEqual(
             set(result["Cache-Control"].split(", ")), {"must-revalidate", "no-store", "no-cache"}
@@ -1029,7 +993,7 @@ class HomeTest(ZulipTestCase):
         ):
             result = self.client_get("/de/")
         page_params = self._get_page_params(result)
-        self.assertEqual(page_params["default_language"], "es")
+        self.assertEqual(page_params["user_settings"]["default_language"], "es")
         # TODO: Verify that the actual language we're using in the
         # translation data is German.
 
@@ -1042,7 +1006,7 @@ class HomeTest(ZulipTestCase):
         self.check_rendered_logged_in_app(result)
 
         page_params = self._get_page_params(result)
-        self.assertEqual(page_params["default_language"], "es")
+        self.assertEqual(page_params["user_settings"]["default_language"], "es")
 
     # TODO: This test would likely be better written as a /register
     # API test with just the drafts event type, to avoid the
@@ -1075,7 +1039,7 @@ class HomeTest(ZulipTestCase):
         # recently edited ones.
         self.login("hamlet")
         page_params = self._get_page_params(self._get_home_page())
-        self.assertEqual(page_params["enable_drafts_synchronization"], True)
+        self.assertEqual(page_params["user_settings"]["enable_drafts_synchronization"], True)
         self.assert_length(page_params["drafts"], settings.MAX_DRAFTS_IN_REGISTER_RESPONSE)
         self.assertEqual(
             Draft.objects.count(), settings.MAX_DRAFTS_IN_REGISTER_RESPONSE + 1 + initial_count

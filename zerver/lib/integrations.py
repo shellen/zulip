@@ -423,6 +423,9 @@ WEBHOOK_INTEGRATIONS: List[WebhookIntegration] = [
         stream_name="opbeat",
         function="zerver.webhooks.opbeat.view.api_opbeat_webhook",
     ),
+    WebhookIntegration(
+        "opencollective", ["communication"], display_name="Open Collective Incoming Webhook"
+    ),
     WebhookIntegration("opsgenie", ["meta-integration", "monitoring"]),
     WebhookIntegration("pagerduty", ["monitoring"], display_name="PagerDuty"),
     WebhookIntegration("papertrail", ["monitoring"]),
@@ -441,6 +444,7 @@ WEBHOOK_INTEGRATIONS: List[WebhookIntegration] = [
     ),
     WebhookIntegration("slack", ["communication"]),
     WebhookIntegration("solano", ["continuous-integration"], display_name="Solano Labs"),
+    WebhookIntegration("sonarqube", ["continuous-integration"], display_name="SonarQube"),
     WebhookIntegration("sonarr", ["entertainment"], display_name="Sonarr"),
     WebhookIntegration("splunk", ["monitoring"], display_name="Splunk"),
     WebhookIntegration("statuspage", ["customer-support"], display_name="Statuspage"),
@@ -761,6 +765,7 @@ DOC_SCREENSHOT_CONFIG: Dict[str, List[BaseScreenshotConfig]] = {
         ScreenshotConfig("incident_closed.json", "003.png"),
     ],
     "opbeat": [ScreenshotConfig("error_reopen.json")],
+    "opencollective": [ScreenshotConfig("one_time_donation.json")],
     "opsgenie": [ScreenshotConfig("addrecipient.json", image_name="000.png")],
     "pagerduty": [ScreenshotConfig("trigger_v2.json")],
     "papertrail": [ScreenshotConfig("short_post.json", payload_as_query_param=True)],
@@ -776,6 +781,7 @@ DOC_SCREENSHOT_CONFIG: Dict[str, List[BaseScreenshotConfig]] = {
     ],
     "slack": [ScreenshotConfig("message_info.txt")],
     "solano": [ScreenshotConfig("build_001.json")],
+    "sonarqube": [ScreenshotConfig("error.json")],
     "sonarr": [ScreenshotConfig("sonarr_episode_grabbed.json")],
     "splunk": [ScreenshotConfig("search_one_result.json")],
     "statuspage": [ScreenshotConfig("incident_created.json")],

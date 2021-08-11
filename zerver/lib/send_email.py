@@ -239,7 +239,6 @@ def send_email(
         realm=realm,
     )
     template = template_prefix.split("/")[-1]
-    logger.info("Sending %s email to %s", template, mail.to)
 
     if dry_run:
         print(mail.message().get_payload()[0])
@@ -247,6 +246,8 @@ def send_email(
 
     if connection is None:
         connection = get_connection()
+
+    logger.info("Sending %s email to %s", template, mail.to)
 
     try:
         # This will call .open() for us, which is a no-op if it's already open;
@@ -271,7 +272,12 @@ def send_email(
         raise EmailNotDeliveredException
 
 
-@backoff.on_exception(backoff.expo, OSError, max_tries=MAX_CONNECTION_TRIES, logger=None)
+@backoff.on_exception(
+    backoff.expo,
+    OSError,
+    max_tries=MAX_CONNECTION_TRIES,
+    logger=None,  # type: ignore[arg-type] # https://github.com/gleb-chipiga/backoff-stubs/pull/2
+)
 def initialize_connection(connection: Optional[BaseEmailBackend] = None) -> BaseEmailBackend:
     if not connection:
         connection = get_connection()
@@ -487,7 +493,7 @@ def send_custom_email(users: List[UserProfile], options: Dict[str, Any]) -> None
     with open(options["markdown_template_path"]) as f:
         text = f.read()
         parsed_email_template = Parser(policy=default).parsestr(text)
-        email_template_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[0:32]
+        email_template_hash = hashlib.sha256(text.encode()).hexdigest()[0:32]
 
     email_filename = f"custom/custom_email_{email_template_hash}.source.html"
     email_id = f"zerver/emails/custom/custom_email_{email_template_hash}"

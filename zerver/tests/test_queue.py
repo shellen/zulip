@@ -5,7 +5,12 @@ import orjson
 from django.test import override_settings
 from pika.exceptions import AMQPConnectionError, ConnectionClosed
 
-from zerver.lib.queue import TornadoQueueClient, get_queue_client, queue_json_publish
+from zerver.lib.queue import (
+    SimpleQueueClient,
+    TornadoQueueClient,
+    get_queue_client,
+    queue_json_publish,
+)
 from zerver.lib.test_classes import ZulipTestCase
 
 
@@ -13,8 +18,8 @@ class TestTornadoQueueClient(ZulipTestCase):
     @mock.patch("zerver.lib.queue.ExceptionFreeTornadoConnection", autospec=True)
     def test_on_open_closed(self, mock_cxn: mock.MagicMock) -> None:
         with self.assertLogs("zulip.queue", "WARNING") as m:
+            mock_cxn().channel.side_effect = ConnectionClosed(500, "test")
             connection = TornadoQueueClient()
-            connection.connection.channel.side_effect = ConnectionClosed("500", "test")
             connection._on_open(mock.MagicMock())
             self.assertEqual(
                 m.output,
@@ -32,6 +37,7 @@ class TestQueueImplementation(ZulipTestCase):
         queue_client = get_queue_client()
 
         def collect(events: List[Dict[str, Any]]) -> None:
+            assert isinstance(queue_client, SimpleQueueClient)
             assert len(events) == 1
             output.append(events[0])
             queue_client.stop_consuming()
@@ -51,6 +57,7 @@ class TestQueueImplementation(ZulipTestCase):
         queue_client = get_queue_client()
 
         def collect(events: List[Dict[str, Any]]) -> None:
+            assert isinstance(queue_client, SimpleQueueClient)
             assert len(events) == 1
             queue_client.stop_consuming()
             nonlocal count
@@ -74,6 +81,7 @@ class TestQueueImplementation(ZulipTestCase):
     @override_settings(USING_RABBITMQ=True)
     def test_queue_error_json(self) -> None:
         queue_client = get_queue_client()
+        assert isinstance(queue_client, SimpleQueueClient)
         actual_publish = queue_client.publish
 
         self.counter = 0

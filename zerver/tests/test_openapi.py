@@ -162,11 +162,7 @@ class OpenAPIToolsTest(ZulipTestCase):
             with self.assertRaises(SchemaError, msg='Opaque object "obj"'):
                 # Checks for opaque objects
                 validate_schema(
-                    (
-                        test_dict["test3"]["responses"]["200"]["content"]["application/json"][
-                            "schema"
-                        ]
-                    )
+                    test_dict["test3"]["responses"]["200"]["content"]["application/json"]["schema"]
                 )
         finally:
             openapi_spec.openapi()["paths"].pop("testing", None)
@@ -285,7 +281,7 @@ class OpenAPIArgumentsTest(ZulipTestCase):
 
     # Endpoints where the documentation is currently failing our
     # consistency tests.  We aim to keep this list empty.
-    buggy_documentation_endpoints: Set[str] = set([])
+    buggy_documentation_endpoints: Set[str] = set()
 
     def convert_regex_to_url_pattern(self, regex_pattern: str) -> str:
         """Convert regular expressions style URL patterns to their
@@ -904,7 +900,7 @@ class TestCurlExampleGeneration(ZulipTestCase):
             "    --data-urlencode num_before=4 \\",
             "    --data-urlencode num_after=8 \\",
             '    --data-urlencode \'narrow=[{"operand": "Denmark", "operator": "stream"}]\' \\',
-            "    --data-urlencode client_gravatar=true \\",
+            "    --data-urlencode client_gravatar=false \\",
             "    --data-urlencode apply_markdown=false \\",
             "    --data-urlencode use_first_unread_anchor=true",
             "```",

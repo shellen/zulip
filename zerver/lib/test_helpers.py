@@ -28,7 +28,6 @@ import boto3
 import fakeldap
 import ldap
 import orjson
-from boto3.resources.base import ServiceResource
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser
 from django.db.migrations.state import StateApps
@@ -37,6 +36,7 @@ from django.http.request import QueryDict
 from django.test import override_settings
 from django.urls import URLResolver
 from moto import mock_s3
+from mypy_boto3_s3.service_resource import Bucket
 
 import zerver.lib.upload
 from zerver.lib import cache
@@ -149,7 +149,7 @@ def queries_captured(
 
     def wrapper_execute(
         self: TimeTrackingCursor,
-        action: Callable[[str, ParamsT], None],
+        action: Callable[[Query, ParamsT], None],
         sql: Query,
         params: ParamsT,
     ) -> None:
@@ -162,7 +162,7 @@ def queries_captured(
             if include_savepoints or not isinstance(sql, str) or "SAVEPOINT" not in sql:
                 queries.append(
                     {
-                        "sql": self.mogrify(sql, params).decode("utf-8"),
+                        "sql": self.mogrify(sql, params).decode(),
                         "time": f"{duration:.3f}",
                     }
                 )
@@ -521,7 +521,7 @@ def use_s3_backend(method: FuncT) -> FuncT:
     return new_method
 
 
-def create_s3_buckets(*bucket_names: str) -> List[ServiceResource]:
+def create_s3_buckets(*bucket_names: str) -> List[Bucket]:
     session = boto3.Session(settings.S3_KEY, settings.S3_SECRET_KEY)
     s3 = session.resource("s3")
     buckets = [s3.create_bucket(Bucket=name) for name in bucket_names]

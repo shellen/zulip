@@ -19,7 +19,7 @@ class TornadoAdapter(HTTPAdapter):
     def __init__(self) -> None:
         # All of the POST requests we make to Tornado are safe to
         # retry; allow retries of them, which is not the default.
-        retry_methods = Retry.DEFAULT_METHOD_WHITELIST | set(["POST"])
+        retry_methods = Retry.DEFAULT_METHOD_WHITELIST | {"POST"}
         retry = Retry(total=3, backoff_factor=1, method_whitelist=retry_methods)
         super().__init__(max_retries=retry)
 
@@ -75,6 +75,7 @@ def request_event_queue(
     narrow: Iterable[Sequence[str]] = [],
     bulk_message_deletion: bool = False,
     stream_typing_notifications: bool = False,
+    user_settings_object: bool = False,
 ) -> Optional[str]:
 
     if not settings.USING_TORNADO:
@@ -95,6 +96,7 @@ def request_event_queue(
         "lifespan_secs": queue_lifespan_secs,
         "bulk_message_deletion": orjson.dumps(bulk_message_deletion),
         "stream_typing_notifications": orjson.dumps(stream_typing_notifications),
+        "user_settings_object": orjson.dumps(user_settings_object),
     }
 
     if event_types is not None:

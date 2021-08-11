@@ -241,8 +241,15 @@ paths:
                                 }
                             - type: object
                               description: |
-                                Event sent to a user's clients when that user's display settings
-                                have changed.
+                                Event sent to clients that that have requested the
+                                `update_display_settings` event type and did not include
+                                `user_settings_object` in their `client_capabilities` when
+                                registering the event queue.
+
+                                **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                                connecting to newer servers should declare the `user_settings_object`
+                                client capability and process the `user_settings` event type instead.
+                              deprecated: true
                               properties:
                                 id:
                                   $ref: "#/components/schemas/EventIdSchema"
@@ -279,7 +286,15 @@ paths:
                             - type: object
                               description: |
                                 Event sent to a user's clients when that user's [notification
-                                settings](/api/update-settings) have changed.
+                                settings](/api/update-settings) have changed with an additional
+                                rule that it is only sent to clients that did not include
+                                `user_settings_object` in their `client_capabilities` when
+                                registering the event queue.
+
+                                **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                                connecting to newer servers should declare the `user_settings_object`
+                                client capability and process the `user_settings` event type instead.
+                              deprecated: true
                               properties:
                                 id:
                                   $ref: "#/components/schemas/EventIdSchema"
@@ -305,6 +320,52 @@ paths:
                                   "type": "update_global_notifications",
                                   "notification_name": "enable_sounds",
                                   "setting": true,
+                                  "id": 0,
+                                }
+                            - type: object
+                              description: |
+                                Event sent to a user's clients when that user's settings
+                                have changed.
+
+                                **Changes**: New in Zulip 5.0 (feature level 89), replacing the
+                                previous `update_display_settings` and `update_global_notifications`
+                                event types, which are still present for backwards compatibility reasons.
+                              properties:
+                                id:
+                                  $ref: "#/components/schemas/EventIdSchema"
+                                type:
+                                  allOf:
+                                    - $ref: "#/components/schemas/EventTypeSchema"
+                                    - enum:
+                                        - user_settings
+                                op:
+                                  type: string
+                                  enum:
+                                    - update
+                                property:
+                                  type: string
+                                  description: |
+                                    Name of the changed setting.
+                                value:
+                                  description: |
+                                    New value of the changed setting.
+                                  oneOf:
+                                    - type: boolean
+                                    - type: integer
+                                    - type: string
+                                language_name:
+                                  description: |
+                                    Present only if the setting to be changed is
+                                    `default_language`. Contains the name of the
+                                    new default language in English.
+                                  type: string
+                              additionalProperties: false
+                              example:
+                                {
+                                  "type": "user_settings",
+                                  "op": "update",
+                                  "property": "high_contrast_mode",
+                                  "value": false,
                                   "id": 0,
                                 }
                             - type: object
@@ -3247,7 +3308,7 @@ paths:
                                     in the [server_settings](/api/get-server-settings) and
                                     [register](/api/register-queue) responses.
 
-                                    **Changes**: New in Zulip 5.0 (feature level 87).
+                                    **Changes**: New in Zulip 5.0 (feature level 88).
                                 zulip_feature_level:
                                   type: integer
                                   description: |
@@ -3414,12 +3475,6 @@ paths:
                                       type: boolean
                                       description: |
                                         Whether [topics are required](/help/require-topics) for messages in this organization.
-                                    message_retention_days:
-                                      type: integer
-                                      description: |
-                                        The default [message retention policy](/help/message-retention-policy)
-                                        for this organization.  Pass `"forever"` to request that messages
-                                        by retained forever (the default).
                                     realm_name:
                                       type: string
                                       description: |
@@ -8178,8 +8233,9 @@ paths:
               client can handle the current API with null values for
               stream-level notification settings (which means the stream
               is not customized and should inherit the user's global
-              notification settings for stream messages).  New in Zulip
-              2.1.0; in earlier Zulip releases, stream-level
+              notification settings for stream messages).
+              <br />
+              New in Zulip 2.1.0; in earlier Zulip releases, stream-level
               notification settings were simple booleans.
 
             * `bulk_message_deletion`: Boolean for whether the client's
@@ -8187,7 +8243,9 @@ paths:
                updated to process the new bulk format (with a
                `message_ids`, rather than a singleton `message_id`).
                Otherwise, the server will send `delete_message` events
-               in a loop.  New in Zulip 3.0 (feature level 13).  This
+               in a loop.
+               <br />
+               New in Zulip 3.0 (feature level 13).  This
                capability is for backwards-compatibility; it will be
                required in a future server release.
 
@@ -8198,14 +8256,32 @@ paths:
                `avatar_url` field in the `realm_user` at its sole discretion
                to optimize network performance.  This is an important optimization
                in organizations with 10,000s of users.
+               <br />
                New in Zulip 3.0 (feature level 18).
 
             * `stream_typing_notifications`: Boolean for whether the client
               supports stream typing notifications.
-
+              <br />
               New in Zulip 4.0 (feature level 58).  This capability is
               for backwards-compatibility; it will be required in a
               future server release.
+
+            * `user_settings_object`: Boolean for whether the client supports the modern
+              `user_settings` event type. If False, the server will additionally send the
+              legacy `update_display_settings` and `update_global_notifications` event
+              types for backwards-compatibility with clients that predate this API migration.
+              <br />
+              <br />
+              Because the feature level 89 API changes were merged together, clients can
+              safely make a request with this client capability and requesting all of the
+              `user_settings`, `update_display_settings`, and
+              `update_global_notifications` event types, and get exactly one copy of
+              settings data on any server version. (And then use the `zulip_feature_level`
+              in the `/register` response or the presence/absence of a `user_settings` key
+              to determine where to look).
+              <br />
+              New in Zulip 5.0 (feature level 89).  This capability is for
+              backwards-compatibility; it will be removed in a future server release.
           content:
             application/json:
               schema:
@@ -8775,6 +8851,10 @@ paths:
                               An array of dictionaries where each dictionary contains
                               details of all unread messages of a single subscribed stream,
                               including muted streams.
+
+                              **Changes**: Prior to Zulip 5.0 (feature level 90), the
+                              dictionaries included an additional `sender_ids` key listing
+                              the set of IDs of users who had sent the unread messages.
                             items:
                               type: object
                               description: |
@@ -8782,13 +8862,6 @@ paths:
                                 message with the message_id as the key.
                               additionalProperties: false
                               properties:
-                                sender_ids:
-                                  type: array
-                                  items:
-                                    type: integer
-                                  description: |
-                                    Array containing the id of the users who have sent recent messages
-                                    on this stream under the given topic which have been unread by the user.
                                 topic:
                                   type: string
                                   description: |
@@ -8948,6 +9021,245 @@ paths:
                                 The [emoji type](/api/add-reaction#parameters) for the emoji associated with the new status.
 
                                 **Changes**: New in Zulip 5.0 (feature level 86).
+                      user_settings:
+                        type: object
+                        description: |
+                          Present if `user_settings` is present in `fetch_event_types`.
+
+                          A dictionary containing the user's personal settings.
+
+                          **Changes**: New in Zulip 5.0 (feature level 89). Previously,
+                          these settings appeared in the top-level object, where they are
+                          available for clients without the `user_settings_object` client
+                          capability for backwards-compatibility.
+                        additionalProperties: false
+                        properties:
+                          twenty_four_hour_time:
+                            type: boolean
+                            description: |
+                              Whether time should be [displayed in 24-hour notation](/help/change-the-time-format).
+                          dense_mode:
+                            type: boolean
+                            description: |
+                              This setting has no effect at present.  It is reserved for use in controlling
+                              the default font size in Zulip.
+                          starred_message_counts:
+                            type: boolean
+                            description: |
+                              Whether clients should display the [number of starred
+                              messages](/help/star-a-message#display-the-number-of-starred-messages).
+                          fluid_layout_width:
+                            type: boolean
+                            description: |
+                              Whether to use the [maximum available screen width](/help/enable-full-width-display)
+                              for the web app's center panel (message feed, recent topics) on wide screens.
+                          high_contrast_mode:
+                            type: boolean
+                            description: |
+                              This setting is reserved for use to control variations in Zulip's design
+                              to help visually impaired users.
+                          color_scheme:
+                            type: integer
+                            description: |
+                              Controls which [color theme](/help/night-mode) to use.
+
+                              * 1 - Automatic
+                              * 2 - Night mode
+                              * 3 - Day mode
+
+                              Automatic detection is implementing using the standard `prefers-color-scheme`
+                              media query.
+                          translate_emoticons:
+                            type: boolean
+                            description: |
+                              Whether to [translate emoticons to emoji](/help/enable-emoticon-translations)
+                              in messages the user sends.
+                          default_language:
+                            type: string
+                            description: |
+                              What [default language](/help/change-your-language) to use for the account.
+
+                              This controls both the Zulip UI as well as email notifications sent to the user.
+
+                              The value needs to be a standard language code that the Zulip server has
+                              translation data for; for example, `"en"` for English or `"de"` for German.
+                          default_view:
+                            type: string
+                            description: |
+                              The [default view](/help/change-default-view) used when opening a new
+                              Zulip web app window or hitting the `Esc` keyboard shortcut repeatedly.
+
+                              * "recent_topics" - Recent topics view
+                              * "all_messages" - All messages view
+                          left_side_userlist:
+                            type: boolean
+                            description: |
+                              Whether the users list on left sidebar in narrow windows.
+
+                              This feature is not heavily used and is likely to be reworked.
+                          emojiset:
+                            type: string
+                            description: |
+                              The user's configured [emoji set](/help/emoji-and-emoticons#use-emoticons),
+                              used to display emoji to the user everything they appear in the UI.
+
+                              * "google" - Google modern
+                              * "google-blob" - Google classic
+                              * "twitter" - Twitter
+                              * "text" - Plain text
+                          demote_inactive_streams:
+                            type: integer
+                            description: |
+                              Whether to [demote inactive streams](/help/manage-inactive-streams) in the left sidebar.
+
+                              * 1 - Automatic
+                              * 2 - Always
+                              * 3 - Never
+                          timezone:
+                            type: string
+                            description: |
+                              The user's [configured timezone](/help/change-your-timezone).
+
+                              Timezone values supported by the server are served at
+                              [/static/generated/timezones.json](/static/generated/timezones.json).
+                          enter_sends:
+                            type: boolean
+                            description: |
+                              Whether the user setting for [sending on pressing Enter](/help/enable-enter-to-send)
+                              in the compose box is enabled.
+                          enable_drafts_synchronization:
+                            type: boolean
+                            description: |
+                              A boolean parameter to control whether synchronizing drafts is enabled for
+                              the user. When synchronization is disabled, all drafts stored in the server
+                              will be automatically deleted from the server.
+
+                              This does not do anything (like sending events) to delete local copies of
+                              drafts stored in clients.
+                          enable_stream_desktop_notifications:
+                            type: boolean
+                            description: |
+                              Enable visual desktop notifications for stream messages.
+                          enable_stream_email_notifications:
+                            type: boolean
+                            description: |
+                              Enable email notifications for stream messages.
+                          enable_stream_push_notifications:
+                            type: boolean
+                            description: |
+                              Enable mobile notifications for stream messages.
+                          enable_stream_audible_notifications:
+                            type: boolean
+                            description: |
+                              Enable audible desktop notifications for stream messages.
+                          notification_sound:
+                            type: string
+                            description: |
+                              Notification sound name.
+                          enable_desktop_notifications:
+                            type: boolean
+                            description: |
+                              Enable visual desktop notifications for private messages and @-mentions.
+                          enable_sounds:
+                            type: boolean
+                            description: |
+                              Enable audible desktop notifications for private messages and
+                              @-mentions.
+                          email_notifications_batching_period_seconds:
+                            type: integer
+                            description: |
+                              The duration (in seconds) for which the server should wait to batch
+                              email notifications before sending them.
+                          enable_offline_email_notifications:
+                            type: boolean
+                            description: |
+                              Enable email notifications for private messages and @-mentions received
+                              when the user is offline.
+                          enable_offline_push_notifications:
+                            type: boolean
+                            description: |
+                              Enable mobile notification for private messages and @-mentions received
+                              when the user is offline.
+                          enable_online_push_notifications:
+                            type: boolean
+                            description: |
+                              Enable mobile notification for private messages and @-mentions received
+                              when the user is online.
+                          enable_digest_emails:
+                            type: boolean
+                            description: |
+                              Enable digest emails when the user is away.
+                          enable_marketing_emails:
+                            type: boolean
+                            description: |
+                              Enable marketing emails. Has no function outside Zulip Cloud.
+                          enable_login_emails:
+                            type: boolean
+                            description: |
+                              Enable email notifications for new logins to account.
+                          message_content_in_email_notifications:
+                            type: boolean
+                            description: |
+                              Include the message's content in email notifications for new messages.
+                          pm_content_in_desktop_notifications:
+                            type: boolean
+                            description: |
+                              Include content of private messages in desktop notifications.
+                          wildcard_mentions_notify:
+                            type: boolean
+                            description: |
+                              Whether wildcard mentions (E.g. @**all**) should send notifications
+                              like a personal mention.
+                          desktop_icon_count_display:
+                            type: integer
+                            description: |
+                              Unread count summary (appears in desktop sidebar and browser tab)
+
+                              * 1 - All unreads
+                              * 2 - Private messages and mentions
+                              * 3 - None
+                          realm_name_in_notifications:
+                            type: boolean
+                            description: |
+                              Include organization name in subject of message notification emails.
+                          presence_enabled:
+                            type: boolean
+                            description: |
+                              Display the presence status to other users when online.
+                          available_notification_sounds:
+                            type: array
+                            items:
+                              type: string
+                            description: |
+                              Array containing the names of the notification sound options
+                              supported by this Zulip server.  Only relevant to support UI
+                              for configuring notification sounds.
+                          emojiset_choices:
+                            description: |
+                              Array of dictionaries where each dictionary describes an emojiset
+                              supported by this version of the Zulip server.
+
+                              Only relevant to clients with configuration UI for choosing an emojiset;
+                              the currently selected emojiset is available in the `emojiset` key.
+
+                              See [PATCH /settings](/api/update-settings) for details on
+                              the meaning of this setting.
+                            type: array
+                            items:
+                              type: object
+                              description: |
+                                Object describing a emojiset.
+                              additionalProperties: false
+                              properties:
+                                key:
+                                  type: string
+                                  description: |
+                                    The key or the name of the emojiset which will be the value
+                                    of `emojiset` if this emojiset is chosen.
+                                text:
+                                  type: string
+                                  description: |
+                                    The text describing the emojiset.
                       has_zoom_token:
                         type: boolean
                         description: |
@@ -8972,222 +9284,405 @@ paths:
 
                           **Changes**: Added in Zulip 4.0 (feature level 47).
                       enable_desktop_notifications:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_digest_emails:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_login_emails:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_marketing_emails:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       email_notifications_batching_period_seconds:
+                        deprecated: true
                         type: integer
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_offline_email_notifications:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_offline_push_notifications:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_online_push_notifications:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_sounds:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_stream_desktop_notifications:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_stream_email_notifications:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_stream_push_notifications:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_stream_audible_notifications:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       wildcard_mentions_notify:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       message_content_in_email_notifications:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       notification_sound:
+                        deprecated: true
                         type: string
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       pm_content_in_desktop_notifications:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       desktop_icon_count_display:
+                        deprecated: true
                         type: integer
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       realm_name_in_notifications:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       presence_enabled:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           The current value of this global notification setting for the user.
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       available_notification_sounds:
+                        deprecated: true
                         type: array
                         items:
                           type: string
                         description: |
-                          Present if `update_global_notifications` is present in `fetch_event_types`.
+                          Present if `update_global_notifications` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in their
+                          client_capabilities` when registering the event queue.
 
                           Array containing the names of the notification sound options supported by
                           this Zulip server.  Only relevant to support UI for configuring notification
                           sounds.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       color_scheme:
+                        deprecated: true
                         type: integer
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           The color scheme selected by the user.
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       default_language:
+                        deprecated: true
                         type: string
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           The default language chosen by the user.
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       demote_inactive_streams:
+                        deprecated: true
                         type: integer
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           Whether the user has chosen to demote inactive streams.
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       dense_mode:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           Whether the user has switched on dense mode.  Dense mode is an experimental
                           feature that is only available in development environments.
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       emojiset:
+                        deprecated: true
                         type: string
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           The name of the emojiset that the user has chosen.
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       enable_drafts_synchronization:
+                        deprecated: true
                         type: boolean
                         description: |
                           Present if `update_display_settings` is present in `fetch_event_types`.
@@ -9198,20 +9693,34 @@ paths:
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
 
-                          **Changes**: New in Zulip 5.0 (feature level 87).
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
+
+                          New in Zulip 5.0 (feature level 87).
                       fluid_layout_width:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           Whether the user has chosen for the layout width to be fluid.
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       default_view:
+                        deprecated: true
                         type: string
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           The [default view](/help/change-default-view) in Zulip, represented
                           as the URL suffix after `#` to be rendered when Zulip loads.
@@ -9220,19 +9729,33 @@ paths:
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       high_contrast_mode:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           Whether has switched on high contrast mode.
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       left_side_userlist:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           Whether the user has chosen for the userlist to be displayed
                           on the left side of the screen (for desktop app and web app) in narrow
@@ -9240,49 +9763,84 @@ paths:
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       starred_message_counts:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           Whether the user has chosen the number of starred messages to
                           be displayed similar to unread counts.
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       timezone:
+                        deprecated: true
                         type: string
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           The timezone configured for the user.  This is used primarily to display
                           the user's timezone to other users.
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       translate_emoticons:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           Whether the user has chosen for emoticons to be translated into emoji
                           in the Zulip compose box.
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       twenty_four_hour_time:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           Whether the user has chosen a twenty four hour time display (true)
                           or a twelve hour one (false).
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                       emojiset_choices:
+                        deprecated: true
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           Array of dictionaries where each dictionary describes an emojiset
                           supported by this version of the Zulip server.
@@ -9292,6 +9850,10 @@ paths:
 
                           See [PATCH /settings](/api/update-settings) for details on
                           the meaning of this setting.
+
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and access the `user_settings` object instead.
                         type: array
                         items:
                           type: object
@@ -9489,8 +10051,11 @@ paths:
                           Present if `realm` is present in `fetch_event_types`.
 
                           The default [message retention policy](/help/message-retention-policy)
-                          for this organization.  Pass `"forever"` to request that messages
+                          for this organization.  Pass `"unlimited"` to request that messages
                           by retained forever (the default).
+
+                          **Changes**: Prior to Zulip 5.0 (feature level 91), no limit was encoded
+                          by passing `"forever"`.
                       realm_name:
                         type: string
                         description: |
@@ -10164,14 +10729,20 @@ paths:
 
                           Whether the current user is a [guest user](/help/roles-and-permissions).
                       enter_sends:
+                        deprecated: true
                         type: boolean
                         description: |
-                          Present if `update_display_settings` is present in `fetch_event_types`.
+                          Present if `update_display_settings` is present in `fetch_event_types`
+                          and only for clients that did not include `user_settings_object` in
+                          their client_capabilities` when registering the event queue.
 
                           Whether the user setting for [sending on pressing Enter](/help/enable-enter-to-send)
                           in the compose box is enabled.
 
-                          **Changes**: Prior to Zulip 5.0 (feature level 84) this field was present
+                          **Changes**: Deprecated in Zulip 5.0 (feature level 89). Clients
+                          connecting to newer servers should declare the `user_settings_object`
+                          client capability and process the `user_settings` event type instead.
+                          Prior to Zulip 5.0 (feature level 84) this field was present
                           in response if 'realm_user' was present in `fetch_event_types`, not
                           `update_display_settings`.
                       user_id:
@@ -13799,10 +14370,13 @@ components:
         since gravatar URLs are long, random strings and thus do not
         compress well. The `client_gravatar` field is set to `true` if
         clients can compute their own gravatars.
+
+        **Changes**: The default value of this parameter was `false`
+        prior to Zulip 5.0 (feature level 92).
       schema:
         type: boolean
-        default: false
-      example: true
+        default: true
+      example: false
     RequiredContent:
       name: content
       in: query
@@ -13980,9 +14554,13 @@ components:
         values are supported:
 
         * "realm_default" => Return to the organization-level setting.
-        * "forever" => Retain messages forever.
+        * "unlimited" => Retain messages forever.
 
-        **Changes**: New in Zulip 3.0 (feature level 17).
+        **Changes**: Prior to Zulip 5.0 (feature level 91), retaining
+        messages forever was encoded using `"forever"` instead of
+        `"unlimited"`.
+
+        New in Zulip 3.0 (feature level 17).
       schema:
         oneOf:
           - type: string

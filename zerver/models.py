@@ -29,7 +29,7 @@ from django.core.validators import MinLengthValidator, RegexValidator, URLValida
 from django.db import models, transaction
 from django.db.models import CASCADE, Manager, Q, Sum
 from django.db.models.query import QuerySet
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_delete
 from django.utils.functional import Promise
 from django.utils.timezone import now as timezone_now
 from django.utils.translation import gettext as _
@@ -404,7 +404,7 @@ class Realm(models.Model):
     )
 
     MESSAGE_RETENTION_SPECIAL_VALUES_MAP = {
-        "forever": -1,
+        "unlimited": -1,
     }
     # For old messages being automatically deleted
     message_retention_days: int = models.IntegerField(null=False, default=-1)
@@ -849,14 +849,27 @@ class Realm(models.Model):
         return self.is_zephyr_mirror_realm
 
 
-def realm_post_delete_handler(*, instance: Realm, **kwargs: object) -> None:
+post_save.connect(flush_realm, sender=Realm)
+
+
+# We register realm cache flushing in a duplicate way to be run both
+# pre_delete and post_delete on purpose:
+# 1. pre_delete is needed because flush_realm wants to flush the UserProfile caches,
+#    and UserProfile objects are deleted via on_delete=CASCADE before the post_delete handler
+#    is called, which results in the `flush_realm` logic not having access to the details
+#    for the deleted users if called at that time.
+# 2. post_delete is run as a precaution to reduce the risk of races where items might be
+#    added to the cache after the pre_delete handler but before the save.
+#    Note that it does not eliminate this risk, not least because it only flushes
+#    the realm cache, and not the user caches, for the reasons explained above.
+def realm_pre_and_post_delete_handler(*, instance: Realm, **kwargs: object) -> None:
     # This would be better as a functools.partial, but for some reason
     # Django doesn't call it even when it's registered as a post_delete handler.
     flush_realm(instance=instance, from_deletion=True)
 
 
-post_save.connect(flush_realm, sender=Realm)
-post_delete.connect(realm_post_delete_handler, sender=Realm)
+pre_delete.connect(realm_pre_and_post_delete_handler, sender=Realm)
+post_delete.connect(realm_pre_and_post_delete_handler, sender=Realm)
 
 
 def get_realm(string_id: str) -> Realm:
@@ -2050,7 +2063,7 @@ class Stream(models.Model):
     # Value -1 means "disable retention policy for this stream unconditionally".
     # Non-negative values have the natural meaning of "archive messages older than <value> days".
     MESSAGE_RETENTION_SPECIAL_VALUES_MAP = {
-        "forever": -1,
+        "unlimited": -1,
         "realm_default": None,
     }
     message_retention_days: Optional[int] = models.IntegerField(null=True, default=None)

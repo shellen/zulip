@@ -105,6 +105,7 @@ def fetch_initial_state_data(
     queue_id: Optional[str] = "",
     client_gravatar: bool = False,
     user_avatar_url_field_optional: bool = False,
+    user_settings_object: bool = False,
     slim_presence: bool = False,
     include_subscribers: bool = True,
     include_streams: bool = True,
@@ -513,16 +514,30 @@ def fetch_initial_state_data(
     if want("stop_words"):
         state["stop_words"] = read_stop_words()
 
-    if want("update_display_settings"):
+    if want("update_display_settings") and not user_settings_object:
         for prop in UserProfile.property_types:
             state[prop] = getattr(settings_user, prop)
         state["emojiset_choices"] = UserProfile.emojiset_choices()
         state["timezone"] = settings_user.timezone
 
-    if want("update_global_notifications"):
+    if want("update_global_notifications") and not user_settings_object:
         for notification in UserProfile.notification_setting_types:
             state[notification] = getattr(settings_user, notification)
         state["available_notification_sounds"] = get_available_notification_sounds()
+
+    if want("user_settings"):
+        state["user_settings"] = {}
+
+        for prop in UserProfile.property_types:
+            state["user_settings"][prop] = getattr(settings_user, prop)
+        for notification in UserProfile.notification_setting_types:
+            state["user_settings"][notification] = getattr(settings_user, notification)
+
+        state["user_settings"]["emojiset_choices"] = UserProfile.emojiset_choices()
+        state["user_settings"]["timezone"] = settings_user.timezone
+        state["user_settings"][
+            "available_notification_sounds"
+        ] = get_available_notification_sounds()
 
     if want("user_status"):
         # We require creating an account to access statuses.
@@ -1102,6 +1117,17 @@ def apply_event(
     elif event["type"] == "update_global_notifications":
         assert event["notification_name"] in UserProfile.notification_setting_types
         state[event["notification_name"]] = event["setting"]
+    elif event["type"] == "user_settings":
+        # timezone setting is not included in property_types or
+        # notification_setting_types dicts, because this setting
+        # is not a part of UserBaseSettings class.
+        if event["property"] != "timezone":
+            assert (
+                event["property"] in UserProfile.property_types
+                or event["property"] in UserProfile.notification_setting_types
+            )
+        state[event["property"]] = event["value"]
+        state["user_settings"][event["property"]] = event["value"]
     elif event["type"] == "invites_changed":
         pass
     elif event["type"] == "user_group":
@@ -1207,6 +1233,7 @@ def do_events_register(
         "user_avatar_url_field_optional", False
     )
     stream_typing_notifications = client_capabilities.get("stream_typing_notifications", False)
+    user_settings_object = client_capabilities.get("user_settings_object", False)
 
     if user_profile.realm.email_address_visibility != Realm.EMAIL_ADDRESS_VISIBILITY_EVERYONE:
         # If real email addresses are not available to the user, their
@@ -1238,6 +1265,7 @@ def do_events_register(
             narrow=narrow,
             bulk_message_deletion=bulk_message_deletion,
             stream_typing_notifications=stream_typing_notifications,
+            user_settings_object=user_settings_object,
         )
 
         if queue_id is None:
@@ -1249,6 +1277,7 @@ def do_events_register(
             queue_id=queue_id,
             client_gravatar=client_gravatar,
             user_avatar_url_field_optional=user_avatar_url_field_optional,
+            user_settings_object=user_settings_object,
             slim_presence=slim_presence,
             include_subscribers=include_subscribers,
             include_streams=include_streams,

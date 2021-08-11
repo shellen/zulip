@@ -5,7 +5,7 @@ import secrets
 import shutil
 import subprocess
 from collections import defaultdict
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Type, TypeVar
 
 import orjson
 import requests
@@ -55,6 +55,41 @@ AddedChannelsT = Dict[str, Tuple[str, int]]
 AddedMPIMsT = Dict[str, Tuple[str, int]]
 DMMembersT = Dict[str, Tuple[str, str]]
 SlackToZulipRecipientT = Dict[str, int]
+# Generic type for SlackBotEmail class
+SlackBotEmailT = TypeVar("SlackBotEmailT", bound="SlackBotEmail")
+
+
+class SlackBotEmail:
+    duplicate_email_count: Dict[str, int] = {}
+    # Mapping of `bot_id` to final email assigned to the bot.
+    assigned_email: Dict[str, str] = {}
+
+    @classmethod
+    def get_email(cls: Type[SlackBotEmailT], user_profile: ZerverFieldsT, domain_name: str) -> str:
+        slack_bot_id = user_profile["bot_id"]
+        if slack_bot_id in cls.assigned_email:
+            return cls.assigned_email[slack_bot_id]
+
+        if "real_name_normalized" in user_profile:
+            slack_bot_name = user_profile["real_name_normalized"]
+        elif "first_name" in user_profile:
+            slack_bot_name = user_profile["first_name"]
+        else:
+            raise AssertionError("Could not identify bot type")
+
+        email = slack_bot_name.replace("Bot", "").replace(" ", "") + f"-bot@{domain_name}"
+
+        if email in cls.duplicate_email_count:
+            email_prefix, email_suffix = email.split("@")
+            email_prefix += cls.duplicate_email_count[email]
+            email = "@".join([email_prefix, email_suffix])
+            # Increment the duplicate email count
+            cls.duplicate_email_count[email] += 1
+        else:
+            cls.duplicate_email_count[email] = 1
+
+        cls.assigned_email[slack_bot_id] = email
+        return email
 
 
 def rm_tree(path: str) -> None:
@@ -367,13 +402,7 @@ def get_user_email(user: ZerverFieldsT, domain_name: str) -> str:
     if user["is_mirror_dummy"]:
         return "{}@{}.slack.com".format(user["name"], user["team_domain"])
     if "bot_id" in user["profile"]:
-        if "real_name_normalized" in user["profile"]:
-            slack_bot_name = user["profile"]["real_name_normalized"]
-        elif "first_name" in user["profile"]:
-            slack_bot_name = user["profile"]["first_name"]
-        else:
-            raise AssertionError("Could not identify bot type")
-        return slack_bot_name.replace("Bot", "").replace(" ", "") + f"-bot@{domain_name}"
+        return SlackBotEmail.get_email(user["profile"], domain_name)
     if get_user_full_name(user).lower() == "slackbot":
         return f"imported-slackbot-bot@{domain_name}"
     raise AssertionError(f"Could not find email address for Slack user {user}")
@@ -1065,8 +1094,6 @@ def get_attachment_path_and_content(fileinfo: ZerverFieldsT, realm_id: int) -> T
     s3_path = "/".join(
         [
             str(realm_id),
-            "SlackImportAttachment",  # This is a special placeholder which should be kept
-            # in sync with 'exports.py' function 'import_message_data'
             format(random.randint(0, 255), "x"),
             secrets.token_urlsafe(18),
             sanitize_name(fileinfo["name"]),
@@ -1360,12 +1387,12 @@ def check_token_access(token: str) -> None:
         logging.info("This is a Slack user token, which grants all rights the user has!")
     elif token.startswith("xoxb-"):
         data = requests.get(
-            "https://slack.com/api/team.info", headers={"Authorization": "Bearer {}".format(token)}
+            "https://slack.com/api/team.info", headers={"Authorization": f"Bearer {token}"}
         )
         if data.status_code != 200 or not data.json()["ok"]:
-            raise ValueError("Invalid Slack token: {}".format(token))
+            raise ValueError(f"Invalid Slack token: {token}")
         has_scopes = set(data.headers.get("x-oauth-scopes", "").split(","))
-        required_scopes = set(["emoji:read", "users:read", "users:read.email", "team:read"])
+        required_scopes = {"emoji:read", "users:read", "users:read.email", "team:read"}
         missing_scopes = required_scopes - has_scopes
         if missing_scopes:
             raise ValueError(
@@ -1381,9 +1408,7 @@ def get_slack_api_data(slack_api_url: str, get_param: str, **kwargs: Any) -> Any
     if not kwargs.get("token"):
         raise AssertionError("Slack token missing in kwargs")
     token = kwargs.pop("token")
-    data = requests.get(
-        slack_api_url, headers={"Authorization": "Bearer {}".format(token)}, **kwargs
-    )
+    data = requests.get(slack_api_url, headers={"Authorization": f"Bearer {token}"}, **kwargs)
 
     if data.status_code == requests.codes.ok:
         result = data.json()

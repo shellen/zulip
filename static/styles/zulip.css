@@ -226,9 +226,9 @@ p.n-margin {
     }
 
     .exit-me {
-        font-size: 30pt;
+        font-size: 20pt;
         font-weight: 200;
-        margin: 5px 0 0 10px;
+        margin: 0 0 0 10px;
         cursor: pointer;
     }
 }
@@ -424,7 +424,12 @@ label {
 }
 
 /* Bootstrap's focus outline uses -webkit-focus-ring-color which doesn't exist in Firefox */
-a:not(:active):focus {
+a:not(:active):focus,
+button:focus,
+.new-style label.checkbox input[type="checkbox"]:focus ~ span,
+i.fa:focus,
+i.zulip-icon:focus,
+.auto-select:focus {
     outline: 2px solid hsl(215, 47%, 50%);
     /* TODO: change solid to auto once the Chromium bug #1105822 is fixed */
 }

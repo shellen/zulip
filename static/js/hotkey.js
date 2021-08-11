@@ -433,6 +433,12 @@ export function process_enter_key(e) {
         return false;
     }
 
+    // All custom logic for overlays/modals is above; if we're in a
+    // modal at this point, let the browser handle the event.
+    if (overlays.is_modal_open()) {
+        return false;
+    }
+
     // If we're on a button or a link and have pressed Enter, let the
     // browser handle the keypress
     //
@@ -558,6 +564,12 @@ export function process_hotkey(e, hotkey) {
             return process_shift_tab_key();
     }
 
+    // This block needs to be before the open modals check, because
+    // the "user status" modal can show the emoji picker.
+    if (emoji_picker.reactions_popped()) {
+        return emoji_picker.navigate(event_name);
+    }
+
     if (overlays.is_modal_open()) {
         return false;
     }
@@ -602,10 +614,6 @@ export function process_hotkey(e, hotkey) {
 
     if (overlays.settings_open() && !popovers.user_info_popped()) {
         return false;
-    }
-
-    if (emoji_picker.reactions_popped()) {
-        return emoji_picker.navigate(event_name);
     }
 
     if (hotspots.is_open()) {

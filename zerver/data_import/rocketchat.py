@@ -1,7 +1,9 @@
 import logging
 import os
+import random
+import secrets
 import subprocess
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Set, Tuple
 
 import bson
 from django.conf import settings
@@ -10,11 +12,13 @@ from django.forms.models import model_to_dict
 from zerver.data_import.import_util import (
     SubscriberHandler,
     ZerverFieldsT,
+    build_attachment,
     build_huddle,
     build_huddle_subscriptions,
     build_message,
     build_personal_subscriptions,
     build_realm,
+    build_realm_emoji,
     build_recipients,
     build_stream,
     build_stream_subscriptions,
@@ -27,8 +31,10 @@ from zerver.data_import.import_util import (
 from zerver.data_import.sequencer import NEXT_ID, IdMapper
 from zerver.data_import.user_handler import UserHandler
 from zerver.lib.emoji import name_to_codepoint
+from zerver.lib.markdown import IMAGE_EXTENSIONS
+from zerver.lib.upload import sanitize_name
 from zerver.lib.utils import process_list_in_batches
-from zerver.models import Reaction, Recipient, UserProfile
+from zerver.models import Reaction, RealmEmoji, Recipient, UserProfile
 
 
 def make_realm(
@@ -147,6 +153,10 @@ def convert_channel_data(
         stream_desc = channel_dict.get("description", "")
         if channel_dict.get("teamId"):
             if channel_dict.get("teamMain") is True:
+                # In case you change this, please also change the stream name
+                # used while adding the Rocket.Chat channel mention data to
+                # message_dict in `message_to_dict` inner-function of
+                # `process_messages` function below.
                 stream_name = "[TEAM] " + stream_name
             else:
                 stream_desc = "[Team {} channel]. {}".format(
@@ -238,18 +248,92 @@ def convert_huddle_data(
     return zerver_huddle
 
 
+def build_custom_emoji(
+    realm_id: int, custom_emoji_data: Dict[str, List[Dict[str, Any]]], output_dir: str
+) -> List[ZerverFieldsT]:
+    logging.info("Starting to process custom emoji")
+
+    emoji_folder = os.path.join(output_dir, "emoji")
+    os.makedirs(emoji_folder, exist_ok=True)
+
+    zerver_realmemoji: List[ZerverFieldsT] = []
+    emoji_records: List[ZerverFieldsT] = []
+
+    # Map emoji file_id to emoji file data
+    emoji_file_data = {}
+    for emoji_file in custom_emoji_data["file"]:
+        emoji_file_data[emoji_file["_id"]] = {"filename": emoji_file["filename"], "chunks": []}
+    for emoji_chunk in custom_emoji_data["chunk"]:
+        emoji_file_data[emoji_chunk["files_id"]]["chunks"].append(emoji_chunk["data"])
+
+    # Build custom emoji
+    for rc_emoji in custom_emoji_data["emoji"]:
+        # Subject to change with changes in database
+        emoji_file_id = ".".join([rc_emoji["name"], rc_emoji["extension"]])
+
+        emoji_file_info = emoji_file_data[emoji_file_id]
+
+        emoji_filename = emoji_file_info["filename"]
+        emoji_data = b"".join(emoji_file_info["chunks"])
+
+        target_sub_path = RealmEmoji.PATH_ID_TEMPLATE.format(
+            realm_id=realm_id,
+            emoji_file_name=emoji_filename,
+        )
+        target_path = os.path.join(emoji_folder, target_sub_path)
+
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        with open(target_path, "wb") as e_file:
+            e_file.write(emoji_data)
+
+        emoji_aliases = [rc_emoji["name"]]
+        emoji_aliases.extend(rc_emoji["aliases"])
+
+        for alias in emoji_aliases:
+            emoji_record = dict(
+                path=target_path,
+                s3_path=target_path,
+                file_name=emoji_filename,
+                realm_id=realm_id,
+                name=alias,
+            )
+            emoji_records.append(emoji_record)
+
+            realmemoji = build_realm_emoji(
+                realm_id=realm_id,
+                name=alias,
+                id=NEXT_ID("realmemoji"),
+                file_name=emoji_filename,
+            )
+            zerver_realmemoji.append(realmemoji)
+
+    create_converted_data_files(emoji_records, output_dir, "/emoji/records.json")
+    logging.info("Done processing emoji")
+
+    return zerver_realmemoji
+
+
 def build_reactions(
     total_reactions: List[ZerverFieldsT],
     reactions: List[Dict[str, Any]],
     message_id: int,
+    zerver_realmemoji: List[ZerverFieldsT],
 ) -> None:
+    realmemoji = {}
+    for emoji in zerver_realmemoji:
+        realmemoji[emoji["name"]] = emoji["id"]
+
     # For the Unicode emoji codes, we use equivalent of
     # function 'emoji_name_to_emoji_code' in 'zerver/lib/emoji' here
     for reaction in reactions:
         emoji_name = reaction["name"]
         user_id = reaction["user_id"]
+        # Check in realm emoji
+        if emoji_name in realmemoji:
+            emoji_code = realmemoji[emoji_name]
+            reaction_type = Reaction.REALM_EMOJI
         # Check in Unicode emoji
-        if emoji_name in name_to_codepoint:
+        elif emoji_name in name_to_codepoint:
             emoji_code = name_to_codepoint[emoji_name]
             reaction_type = Reaction.UNICODE_EMOJI
         else:  # nocoverage
@@ -269,6 +353,74 @@ def build_reactions(
         total_reactions.append(reaction_dict)
 
 
+def process_message_attachment(
+    upload: Dict[str, Any],
+    realm_id: int,
+    message_id: int,
+    user_id: int,
+    user_handler: UserHandler,
+    zerver_attachment: List[ZerverFieldsT],
+    uploads_list: List[ZerverFieldsT],
+    upload_id_to_upload_data_map: Dict[str, Dict[str, Any]],
+    output_dir: str,
+) -> Tuple[str, bool]:
+    upload_file_data = upload_id_to_upload_data_map[upload["_id"]]
+    file_name = upload["name"]
+    file_ext = f'.{upload["type"].split("/")[-1]}'
+
+    has_image = False
+    if file_ext.lower() in IMAGE_EXTENSIONS:
+        has_image = True
+
+    s3_path = "/".join(
+        [
+            str(realm_id),
+            format(random.randint(0, 255), "x"),
+            secrets.token_urlsafe(18),
+            sanitize_name(file_name),
+        ]
+    )
+
+    # Build the attachment from chunks and save it to s3_path.
+    file_out_path = os.path.join(output_dir, "uploads", s3_path)
+    os.makedirs(os.path.dirname(file_out_path), exist_ok=True)
+    with open(file_out_path, "wb") as upload_file:
+        upload_file.write(b"".join(upload_file_data["chunk"]))
+
+    attachment_content = (
+        f'{upload_file_data["description"]}\n\n[{file_name}](/user_uploads/{s3_path})'
+    )
+
+    fileinfo = {
+        "name": file_name,
+        "size": upload_file_data["size"],
+        "created": float(upload_file_data["_updatedAt"].timestamp()),
+    }
+
+    upload = dict(
+        path=s3_path,
+        realm_id=realm_id,
+        content_type=upload["type"],
+        user_profile_id=user_id,
+        last_modified=fileinfo["created"],
+        user_profile_email=user_handler.get_user(user_id=user_id)["email"],
+        s3_path=s3_path,
+        size=fileinfo["size"],
+    )
+    uploads_list.append(upload)
+
+    build_attachment(
+        realm_id=realm_id,
+        message_ids={message_id},
+        user_id=user_id,
+        fileinfo=fileinfo,
+        s3_path=s3_path,
+        zerver_attachment=zerver_attachment,
+    )
+
+    return attachment_content, has_image
+
+
 def process_raw_message_batch(
     realm_id: int,
     raw_messages: List[Dict[str, Any]],
@@ -276,9 +428,16 @@ def process_raw_message_batch(
     user_handler: UserHandler,
     is_pm_data: bool,
     output_dir: str,
+    zerver_realmemoji: List[ZerverFieldsT],
     total_reactions: List[ZerverFieldsT],
+    uploads_list: List[ZerverFieldsT],
+    zerver_attachment: List[ZerverFieldsT],
+    upload_id_to_upload_data_map: Dict[str, Dict[str, Any]],
 ) -> None:
-    def fix_mentions(content: str, mention_user_ids: Set[int]) -> str:
+    def fix_mentions(
+        content: str, mention_user_ids: Set[int], rc_channel_mention_data: List[Dict[str, str]]
+    ) -> str:
+        # Fix user mentions
         for user_id in mention_user_ids:
             user = user_handler.get_user(user_id=user_id)
             rc_mention = "@{short_name}".format(**user)
@@ -289,6 +448,13 @@ def process_raw_message_batch(
         # We don't have an equivalent for Rocket.Chat's @here mention
         # which mentions all users active in the channel.
         content = content.replace("@here", "@**all**")
+
+        # Fix channel mentions
+        for mention_data in rc_channel_mention_data:
+            rc_mention = mention_data["rc_mention"]
+            zulip_mention = mention_data["zulip_mention"]
+            content = content.replace(rc_mention, zulip_mention)
+
         return content
 
     mention_map: Dict[int, Set[int]] = {}
@@ -302,6 +468,7 @@ def process_raw_message_batch(
         content = fix_mentions(
             content=raw_message["content"],
             mention_user_ids=mention_user_ids,
+            rc_channel_mention_data=raw_message["rc_channel_mention_data"],
         )
 
         if len(content) > 10000:  # nocoverage
@@ -314,6 +481,28 @@ def process_raw_message_batch(
 
         rendered_content = None
 
+        has_attachment = False
+        has_image = False
+        has_link = raw_message["has_link"]
+
+        if "file" in raw_message:
+            has_attachment = True
+            has_link = True
+
+            attachment_content, has_image = process_message_attachment(
+                upload=raw_message["file"],
+                realm_id=realm_id,
+                message_id=message_id,
+                user_id=sender_user_id,
+                user_handler=user_handler,
+                uploads_list=uploads_list,
+                zerver_attachment=zerver_attachment,
+                upload_id_to_upload_data_map=upload_id_to_upload_data_map,
+                output_dir=output_dir,
+            )
+
+            content += attachment_content
+
         topic_name = raw_message["topic_name"]
 
         message = build_message(
@@ -324,13 +513,16 @@ def process_raw_message_batch(
             rendered_content=rendered_content,
             topic_name=topic_name,
             user_id=sender_user_id,
-            has_attachment=False,
+            has_image=has_image,
+            has_link=has_link,
+            has_attachment=has_attachment,
         )
         zerver_message.append(message)
         build_reactions(
             total_reactions=total_reactions,
             reactions=raw_message["reactions"],
             message_id=message_id,
+            zerver_realmemoji=zerver_realmemoji,
         )
 
     zerver_usermessage = make_user_messages(
@@ -363,10 +555,15 @@ def process_messages(
     stream_id_to_recipient_id: Dict[int, int],
     huddle_id_mapper: IdMapper,
     huddle_id_to_recipient_id: Dict[int, int],
+    room_id_to_room_map: Dict[str, Dict[str, Any]],
     dsc_id_to_dsc_map: Dict[str, Dict[str, Any]],
     direct_id_to_direct_map: Dict[str, Dict[str, Any]],
     huddle_id_to_huddle_map: Dict[str, Dict[str, Any]],
+    zerver_realmemoji: List[ZerverFieldsT],
     total_reactions: List[ZerverFieldsT],
+    uploads_list: List[ZerverFieldsT],
+    zerver_attachment: List[ZerverFieldsT],
+    upload_id_to_upload_data_map: Dict[str, Dict[str, Any]],
     output_dir: str,
 ) -> None:
     def list_reactions(reactions: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -399,6 +596,7 @@ def process_messages(
             content=content,
             date_sent=int(message["ts"].timestamp()),
             reactions=reactions,
+            has_link=True if message.get("urls") else False,
         )
 
         # Add recipient_id and topic to message_dict
@@ -424,13 +622,17 @@ def process_messages(
             parent_channel_id = dsc_channel["prid"]
             stream_id = stream_id_mapper.get(parent_channel_id)
             message_dict["recipient_id"] = stream_id_to_recipient_id[stream_id]
+
+            # In case you change this, please also change the topic name used
+            # in discussion mention to topic mention conversion below, while
+            # adding the Rocket.Chat channel mention data to message_dict.
             message_dict["topic_name"] = f'{dsc_channel["fname"]} (Imported from Rocket.Chat)'
         else:
             stream_id = stream_id_mapper.get(message["rid"])
             message_dict["recipient_id"] = stream_id_to_recipient_id[stream_id]
             message_dict["topic_name"] = "Imported from Rocket.Chat"
 
-        # Add mentions to message_dict
+        # Add user mentions to message_dict
         mention_user_ids = set()
         for mention in message.get("mentions", []):
             mention_id = mention["_id"]
@@ -439,6 +641,46 @@ def process_messages(
             user_id = user_id_mapper.get(mention_id)
             mention_user_ids.add(user_id)
         message_dict["mention_user_ids"] = mention_user_ids
+
+        # Add channel mentions to message_dict
+        rc_channel_mention_data: List[Dict[str, str]] = []
+        for mention in message.get("channels", []):
+            mention_rc_channel_id = mention["_id"]
+            mention_rc_channel_name = mention["name"]
+            rc_mention = f"#{mention_rc_channel_name}"
+
+            if mention_rc_channel_id in room_id_to_room_map:
+                # Channel is converted to a stream.
+                converted_stream_name = mention_rc_channel_name
+
+                rc_channel = room_id_to_room_map[mention_rc_channel_id]
+                if rc_channel.get("teamMain") is True:
+                    # Channel is a team's main channel
+                    converted_stream_name = "[TEAM] " + converted_stream_name
+
+                zulip_mention = f"#**{converted_stream_name}**"
+            elif mention_rc_channel_id in dsc_id_to_dsc_map:
+                # Channel is a discussion and is converted to a topic.
+                dsc_channel = dsc_id_to_dsc_map[mention_rc_channel_id]
+                parent_channel_id = dsc_channel["prid"]
+                parent_rc_channel = room_id_to_room_map[parent_channel_id]
+
+                converted_topic_name = f'{dsc_channel["fname"]} (Imported from Rocket.Chat)'
+                parent_stream_name = parent_rc_channel["name"]
+
+                if parent_rc_channel.get("teamMain") is True:
+                    # Parent channel is a team's main channel
+                    parent_stream_name = "[TEAM] " + parent_stream_name
+
+                zulip_mention = f"#**{parent_stream_name}>{converted_topic_name}**"
+
+            mention_data = {"rc_mention": rc_mention, "zulip_mention": zulip_mention}
+            rc_channel_mention_data.append(mention_data)
+        message_dict["rc_channel_mention_data"] = rc_channel_mention_data
+
+        # Add uploaded file (attachment) to message_dict
+        if message.get("file"):
+            message_dict["file"] = message["file"]
 
         return message_dict
 
@@ -458,7 +700,11 @@ def process_messages(
             user_handler=user_handler,
             is_pm_data=is_pm_data,
             output_dir=output_dir,
+            zerver_realmemoji=zerver_realmemoji,
             total_reactions=total_reactions,
+            uploads_list=uploads_list,
+            zerver_attachment=zerver_attachment,
+            upload_id_to_upload_data_map=upload_id_to_upload_data_map,
         )
 
     chunk_size = 1000
@@ -468,6 +714,20 @@ def process_messages(
         chunk_size=chunk_size,
         process_batch=process_batch,
     )
+
+
+def map_upload_id_to_upload_data(
+    upload_data: Dict[str, List[Dict[str, Any]]],
+) -> Dict[str, Dict[str, Any]]:
+    upload_id_to_upload_data_map: Dict[str, Dict[str, Any]] = {}
+
+    for upload in upload_data["upload"]:
+        upload_id_to_upload_data_map[upload["_id"]] = {**upload, "chunk": []}
+
+    for chunk in upload_data["chunk"]:
+        upload_id_to_upload_data_map[chunk["files_id"]]["chunk"].append(chunk["data"])
+
+    return upload_id_to_upload_data_map
 
 
 def separate_channel_and_private_messages(
@@ -550,6 +810,8 @@ def rocketchat_data_to_dict(rocketchat_data_dir: str) -> Dict[str, Any]:
     rocketchat_data["avatar"] = {"avatar": [], "file": [], "chunk": []}
     rocketchat_data["room"] = []
     rocketchat_data["message"] = []
+    rocketchat_data["custom_emoji"] = {"emoji": [], "file": [], "chunk": []}
+    rocketchat_data["upload"] = {"upload": [], "file": [], "chunk": []}
 
     # Get instance
     with open(os.path.join(rocketchat_data_dir, "instances.bson"), "rb") as fcache:
@@ -563,11 +825,16 @@ def rocketchat_data_to_dict(rocketchat_data_dir: str) -> Dict[str, Any]:
     with open(os.path.join(rocketchat_data_dir, "rocketchat_avatars.bson"), "rb") as fcache:
         rocketchat_data["avatar"]["avatar"] = bson.decode_all(fcache.read())
 
-    with open(os.path.join(rocketchat_data_dir, "rocketchat_avatars.chunks.bson"), "rb") as fcache:
-        rocketchat_data["avatar"]["chunk"] = bson.decode_all(fcache.read())
+    if rocketchat_data["avatar"]["avatar"]:
+        with open(
+            os.path.join(rocketchat_data_dir, "rocketchat_avatars.files.bson"), "rb"
+        ) as fcache:
+            rocketchat_data["avatar"]["file"] = bson.decode_all(fcache.read())
 
-    with open(os.path.join(rocketchat_data_dir, "rocketchat_avatars.files.bson"), "rb") as fcache:
-        rocketchat_data["avatar"]["file"] = bson.decode_all(fcache.read())
+        with open(
+            os.path.join(rocketchat_data_dir, "rocketchat_avatars.chunks.bson"), "rb"
+        ) as fcache:
+            rocketchat_data["avatar"]["chunk"] = bson.decode_all(fcache.read())
 
     # Get room
     with open(os.path.join(rocketchat_data_dir, "rocketchat_room.bson"), "rb") as fcache:
@@ -576,6 +843,32 @@ def rocketchat_data_to_dict(rocketchat_data_dir: str) -> Dict[str, Any]:
     # Get messages
     with open(os.path.join(rocketchat_data_dir, "rocketchat_message.bson"), "rb") as fcache:
         rocketchat_data["message"] = bson.decode_all(fcache.read())
+
+    # Get custom emoji
+    with open(os.path.join(rocketchat_data_dir, "rocketchat_custom_emoji.bson"), "rb") as fcache:
+        rocketchat_data["custom_emoji"]["emoji"] = bson.decode_all(fcache.read())
+
+    if rocketchat_data["custom_emoji"]["emoji"]:
+        with open(os.path.join(rocketchat_data_dir, "custom_emoji.files.bson"), "rb") as fcache:
+            rocketchat_data["custom_emoji"]["file"] = bson.decode_all(fcache.read())
+
+        with open(os.path.join(rocketchat_data_dir, "custom_emoji.chunks.bson"), "rb") as fcache:
+            rocketchat_data["custom_emoji"]["chunk"] = bson.decode_all(fcache.read())
+
+    # Get uploads
+    with open(os.path.join(rocketchat_data_dir, "rocketchat_uploads.bson"), "rb") as fcache:
+        rocketchat_data["upload"]["upload"] = bson.decode_all(fcache.read())
+
+    if rocketchat_data["upload"]["upload"]:
+        with open(
+            os.path.join(rocketchat_data_dir, "rocketchat_uploads.files.bson"), "rb"
+        ) as fcache:
+            rocketchat_data["upload"]["file"] = bson.decode_all(fcache.read())
+
+        with open(
+            os.path.join(rocketchat_data_dir, "rocketchat_uploads.chunks.bson"), "rb"
+        ) as fcache:
+            rocketchat_data["upload"]["chunk"] = bson.decode_all(fcache.read())
 
     return rocketchat_data
 
@@ -677,6 +970,13 @@ def do_convert_data(rocketchat_data_dir: str, output_dir: str) -> None:
     zerver_subscription = personal_subscriptions + stream_subscriptions + huddle_subscriptions
     realm["zerver_subscription"] = zerver_subscription
 
+    zerver_realmemoji = build_custom_emoji(
+        realm_id=realm_id,
+        custom_emoji_data=rocketchat_data["custom_emoji"],
+        output_dir=output_dir,
+    )
+    realm["zerver_realmemoji"] = zerver_realmemoji
+
     subscriber_map = make_subscriber_map(
         zerver_subscription=zerver_subscription,
     )
@@ -704,6 +1004,10 @@ def do_convert_data(rocketchat_data_dir: str, output_dir: str) -> None:
     )
 
     total_reactions: List[ZerverFieldsT] = []
+    uploads_list: List[ZerverFieldsT] = []
+    zerver_attachment: List[ZerverFieldsT] = []
+
+    upload_id_to_upload_data_map = map_upload_id_to_upload_data(rocketchat_data["upload"])
 
     # Process channel messages
     process_messages(
@@ -719,10 +1023,15 @@ def do_convert_data(rocketchat_data_dir: str, output_dir: str) -> None:
         stream_id_to_recipient_id=stream_id_to_recipient_id,
         huddle_id_mapper=huddle_id_mapper,
         huddle_id_to_recipient_id=huddle_id_to_recipient_id,
+        room_id_to_room_map=room_id_to_room_map,
         dsc_id_to_dsc_map=dsc_id_to_dsc_map,
         direct_id_to_direct_map=direct_id_to_direct_map,
         huddle_id_to_huddle_map=huddle_id_to_huddle_map,
+        zerver_realmemoji=zerver_realmemoji,
         total_reactions=total_reactions,
+        uploads_list=uploads_list,
+        zerver_attachment=zerver_attachment,
+        upload_id_to_upload_data_map=upload_id_to_upload_data_map,
         output_dir=output_dir,
     )
     # Process private messages
@@ -739,10 +1048,15 @@ def do_convert_data(rocketchat_data_dir: str, output_dir: str) -> None:
         stream_id_to_recipient_id=stream_id_to_recipient_id,
         huddle_id_mapper=huddle_id_mapper,
         huddle_id_to_recipient_id=huddle_id_to_recipient_id,
+        room_id_to_room_map=room_id_to_room_map,
         dsc_id_to_dsc_map=dsc_id_to_dsc_map,
         direct_id_to_direct_map=direct_id_to_direct_map,
         huddle_id_to_huddle_map=huddle_id_to_huddle_map,
+        zerver_realmemoji=zerver_realmemoji,
         total_reactions=total_reactions,
+        uploads_list=uploads_list,
+        zerver_attachment=zerver_attachment,
+        upload_id_to_upload_data_map=upload_id_to_upload_data_map,
         output_dir=output_dir,
     )
     realm["zerver_reaction"] = total_reactions
@@ -752,12 +1066,11 @@ def do_convert_data(rocketchat_data_dir: str, output_dir: str) -> None:
     create_converted_data_files(realm, output_dir, "/realm.json")
     # TODO: Add support for importing avatars
     create_converted_data_files([], output_dir, "/avatars/records.json")
-    # TODO: Add support for importing uploads
-    create_converted_data_files([], output_dir, "/uploads/records.json")
 
-    # TODO: Add support for importing attachments
-    attachment: Dict[str, List[Any]] = {"zerver_attachment": []}
+    # Import attachments
+    attachment: Dict[str, List[Any]] = {"zerver_attachment": zerver_attachment}
     create_converted_data_files(attachment, output_dir, "/attachment.json")
+    create_converted_data_files(uploads_list, output_dir, "/uploads/records.json")
 
     logging.info("Start making tarball")
     subprocess.check_call(["tar", "-czf", output_dir + ".tar.gz", output_dir, "-P"])

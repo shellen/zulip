@@ -16,7 +16,7 @@ from django.contrib.auth import get_backends
 from django.utils.timezone import now as timezone_now
 from django.utils.translation import gettext as _
 from django.utils.translation import override as override_language
-from lxml.cssselect import CSSSelector
+from lxml.html import builder as E
 
 from confirmation.models import one_click_unsubscribe_link
 from zerver.decorator import statsd_increment
@@ -80,13 +80,8 @@ def relative_to_full_url(base_url: str, content: str) -> str:
     if fragment.get("class") == "message_inline_image":
         image_link = fragment.find("a").get("href")
         image_title = fragment.find("a").get("title")
-        fragment = lxml.html.Element("p")
-        a = lxml.html.Element("a")
-        a.set("href", image_link)
-        a.set("target", "_blank")
-        a.set("title", image_title)
-        a.text = image_link
-        fragment.append(a)
+        title_attr = {} if image_title is None else {"title": image_title}
+        fragment = E.P(E.A(image_link, href=image_link, target="_blank", **title_attr))
 
     fragment.make_links_absolute(base_url)
     content = lxml.html.tostring(fragment, encoding="unicode")
@@ -95,7 +90,7 @@ def relative_to_full_url(base_url: str, content: str) -> str:
 
 
 def fix_emojis(content: str, base_url: str, emojiset: str) -> str:
-    def make_emoji_img_elem(emoji_span_elem: CSSSelector) -> Dict[str, Any]:
+    def make_emoji_img_elem(emoji_span_elem: lxml.html.HtmlElement) -> Dict[str, Any]:
         # Convert the emoji spans to img tags.
         classes = emoji_span_elem.get("class")
         match = re.search(r"emoji-(?P<emoji_code>\S+)", classes)
@@ -107,10 +102,7 @@ def fix_emojis(content: str, base_url: str, emojiset: str) -> str:
         emoji_name = emoji_span_elem.get("title")
         alt_code = emoji_span_elem.text
         image_url = base_url + f"/static/generated/emoji/images-{emojiset}-64/{emoji_code}.png"
-        img_elem = lxml.html.fromstring(
-            f'<img alt="{alt_code}" src="{image_url}" title="{emoji_name}">'
-        )
-        img_elem.set("style", "height: 20px;")
+        img_elem = E.IMG(alt=alt_code, src=image_url, title=emoji_name, style="height: 20px;")
         img_elem.tail = emoji_span_elem.tail
         return img_elem
 
@@ -139,16 +131,13 @@ def fix_spoilers_in_html(content: str, language: str) -> str:
         header_content = header.find("p")
         if header_content is None:
             # Create a new element to append the spoiler to)
-            header_content = lxml.html.fromstring("<p></p>")
+            header_content = E.P()
             header.append(header_content)
         else:
-            # Add a space. Its simpler to append a new span element than
-            # inserting text after the last node ends since neither .text
-            # and .tail do the right thing for us.
-            header_content.append(lxml.html.fromstring("<span> </span>"))
-        span_elem = lxml.html.fromstring(
-            f'<span class="spoiler-title" title="{spoiler_title}">({spoiler_title})</span'
-        )
+            # Add a space.
+            rear = header_content[-1] if len(header_content) else header_content
+            rear.tail = (rear.tail or "") + " "
+        span_elem = E.SPAN(f"({spoiler_title})", **E.CLASS("spoiler-title"), title=spoiler_title)
         header_content.append(span_elem)
         header.drop_tag()
         spoiler_content.drop_tree()
@@ -584,6 +573,9 @@ def handle_missedmessage_emails(
     }
 
     user_profile = get_user_profile_by_id(user_profile_id)
+    if user_profile.is_bot:  # nocoverage # TODO -- needs a test.
+        # Never email bot users.
+        return
 
     # Note: This query structure automatically filters out any
     # messages that were permanently deleted, since those would now be

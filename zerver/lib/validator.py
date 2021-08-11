@@ -29,6 +29,7 @@ for any particular type of object.
 """
 import re
 from datetime import datetime
+from decimal import Decimal
 from typing import (
     Any,
     Callable,
@@ -45,6 +46,7 @@ from typing import (
 )
 
 import orjson
+import pytz
 from django.core.exceptions import ValidationError
 from django.core.validators import URLValidator, validate_email
 from django.utils.translation import gettext as _
@@ -567,6 +569,33 @@ def to_positive_or_allowed_int(allowed_integer: Optional[int] = None) -> Callabl
         if x == 0:
             raise ValueError("argument is 0")
         return to_non_negative_int(s)
+
+    return converter
+
+
+def to_float(s: str) -> float:
+    return float(s)
+
+
+def to_decimal(s: str) -> Decimal:
+    return Decimal(s)
+
+
+def to_timezone_or_empty(s: str) -> str:
+    if s in pytz.all_timezones_set:
+        return s
+    else:
+        return ""
+
+
+def to_converted_or_fallback(
+    sub_converter: Callable[[str], ResultT], default: ResultT
+) -> Callable[[str], ResultT]:
+    def converter(s: str) -> ResultT:
+        try:
+            return sub_converter(s)
+        except ValueError:
+            return default
 
     return converter
 

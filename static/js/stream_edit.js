@@ -38,6 +38,7 @@ import * as ui from "./ui";
 import * as ui_report from "./ui_report";
 import * as user_group_pill from "./user_group_pill";
 import * as user_pill from "./user_pill";
+import {user_settings} from "./user_settings";
 import * as util from "./util";
 
 export let pill_widget;
@@ -150,7 +151,7 @@ function set_stream_message_retention_setting_dropdown(stream) {
     if (stream.message_retention_days === null) {
         value = "realm_default";
     } else if (stream.message_retention_days === settings_config.retain_message_forever) {
-        value = "forever";
+        value = "unlimited";
     }
 
     $(".stream_message_retention_setting").val(value);
@@ -516,10 +517,21 @@ export function show_settings_for(node) {
     const slim_sub = sub_store.get(stream_id);
     stream_data.clean_up_description(slim_sub);
     const sub = stream_settings_data.get_sub_for_settings(slim_sub);
+    const all_settings = stream_settings(sub);
+
+    const other_settings = [];
+    const notification_settings = all_settings.filter((setting) => {
+        if (setting.is_notification_setting) {
+            return true;
+        }
+        other_settings.push(setting);
+        return false;
+    });
 
     const html = render_stream_settings({
         sub,
-        settings: stream_settings(sub),
+        notification_settings,
+        other_settings,
         stream_post_policy_values: stream_data.stream_post_policy_values,
         message_retention_text: get_retention_policy_text_for_subscription_type(sub),
     });
@@ -592,9 +604,9 @@ export function stream_setting_changed(e, from_notification_settings) {
     }
     if (is_notification_setting(setting) && sub[setting] === null) {
         if (setting === "wildcard_mentions_notify") {
-            sub[setting] = page_params[setting];
+            sub[setting] = user_settings[setting];
         } else {
-            sub[setting] = page_params["enable_stream_" + setting];
+            sub[setting] = user_settings["enable_stream_" + setting];
         }
     }
     set_stream_property(sub, setting, e.target.checked, status_element);
@@ -625,7 +637,7 @@ function get_message_retention_days_from_sub(sub) {
         return "realm_default";
     }
     if (sub.message_retention_days === -1) {
-        return "forever";
+        return "unlimited";
     }
     return sub.message_retention_days;
 }

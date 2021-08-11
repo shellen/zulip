@@ -12,6 +12,7 @@ import * as settings_ui from "./settings_ui";
 import * as stream_edit from "./stream_edit";
 import * as stream_settings_data from "./stream_settings_data";
 import * as unread_ui from "./unread_ui";
+import {user_settings} from "./user_settings";
 
 function rerender_ui() {
     const unmatched_streams_table = $("#stream-specific-notify-table");
@@ -50,7 +51,7 @@ function change_notification_setting(setting, value, status_element) {
 }
 
 function update_desktop_icon_count_display() {
-    $("#desktop_icon_count_display").val(page_params.desktop_icon_count_display);
+    $("#desktop_icon_count_display").val(user_settings.desktop_icon_count_display);
     unread_ui.update_unread_counts();
 }
 
@@ -96,13 +97,13 @@ export function set_up() {
     });
 
     $("#play_notification_sound").on("click", () => {
-        if (page_params.notification_sound !== "none") {
+        if (user_settings.notification_sound !== "none") {
             $("#notification-sound-audio")[0].play();
         }
     });
 
     const notification_sound_dropdown = $("#notification_sound");
-    notification_sound_dropdown.val(page_params.notification_sound);
+    notification_sound_dropdown.val(user_settings.notification_sound);
 
     $("#enable_sounds, #enable_stream_audible_notifications").on("change", () => {
         if (
@@ -135,7 +136,7 @@ export function update_page() {
             continue;
         }
 
-        $(`#${CSS.escape(setting)}`).prop("checked", page_params[setting]);
+        $(`#${CSS.escape(setting)}`).prop("checked", user_settings[setting]);
     }
     rerender_ui();
 }

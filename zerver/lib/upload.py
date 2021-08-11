@@ -15,7 +15,6 @@ from typing import Any, Callable, Optional, Tuple
 
 import boto3
 import botocore
-from boto3.resources.base import ServiceResource
 from boto3.session import Session
 from botocore.client import Config
 from django.conf import settings
@@ -25,7 +24,9 @@ from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.translation import gettext as _
 from jinja2.utils import Markup as mark_safe
-from PIL import ExifTags, Image, ImageOps
+from mypy_boto3_s3.client import S3Client
+from mypy_boto3_s3.service_resource import Bucket, Object
+from PIL import Image, ImageOps
 from PIL.GifImagePlugin import GifImageFile
 from PIL.Image import DecompressionBombError
 
@@ -103,33 +104,10 @@ class BadImageError(JsonableError):
     code = ErrorCode.BAD_IMAGE
 
 
-name_to_tag_num = {name: num for num, name in ExifTags.TAGS.items()}
-
-# https://stackoverflow.com/a/6218425
-def exif_rotate(image: Image) -> Image:
-    if not hasattr(image, "_getexif"):
-        return image
-    exif_data = image._getexif()
-    if exif_data is None:
-        return image
-
-    exif_dict = dict(exif_data.items())
-    orientation = exif_dict.get(name_to_tag_num["Orientation"])
-
-    if orientation == 3:
-        return image.rotate(180, expand=True)
-    elif orientation == 6:
-        return image.rotate(270, expand=True)
-    elif orientation == 8:
-        return image.rotate(90, expand=True)
-
-    return image
-
-
 def resize_avatar(image_data: bytes, size: int = DEFAULT_AVATAR_SIZE) -> bytes:
     try:
         im = Image.open(io.BytesIO(image_data))
-        im = exif_rotate(im)
+        im = ImageOps.exif_transpose(im)
         im = ImageOps.fit(im, (size, size), Image.ANTIALIAS)
     except OSError:
         raise BadImageError(_("Could not decode image; did you upload an image file?"))
@@ -145,7 +123,7 @@ def resize_avatar(image_data: bytes, size: int = DEFAULT_AVATAR_SIZE) -> bytes:
 def resize_logo(image_data: bytes) -> bytes:
     try:
         im = Image.open(io.BytesIO(image_data))
-        im = exif_rotate(im)
+        im = ImageOps.exif_transpose(im)
         im.thumbnail((8 * DEFAULT_AVATAR_SIZE, DEFAULT_AVATAR_SIZE), Image.ANTIALIAS)
     except OSError:
         raise BadImageError(_("Could not decode image; did you upload an image file?"))
@@ -171,7 +149,9 @@ def resize_gif(im: GifImageFile, size: int = DEFAULT_EMOJI_SIZE) -> bytes:
         new_frame = ImageOps.pad(new_frame, (size, size), Image.ANTIALIAS)
         frames.append(new_frame)
         duration_info.append(im.info["duration"])
-        disposals.append(im.disposal_method)
+        disposals.append(
+            im.disposal_method  # type: ignore[attr-defined]  # private member missing from stubs
+        )
     out = io.BytesIO()
     frames[0].save(
         out,
@@ -191,6 +171,7 @@ def resize_emoji(image_data: bytes, size: int = DEFAULT_EMOJI_SIZE) -> bytes:
         im = Image.open(io.BytesIO(image_data))
         image_format = im.format
         if image_format == "GIF":
+            assert isinstance(im, GifImageFile)
             # There are a number of bugs in Pillow.GifImagePlugin which cause
             # results in resized gifs being broken. To work around this we
             # only resize under certain conditions to minimize the chance of
@@ -202,7 +183,7 @@ def resize_emoji(image_data: bytes, size: int = DEFAULT_EMOJI_SIZE) -> bytes:
             )
             return resize_gif(im, size) if should_resize else image_data
         else:
-            im = exif_rotate(im)
+            im = ImageOps.exif_transpose(im)
             im = ImageOps.fit(im, (size, size), Image.ANTIALIAS)
             out = io.BytesIO()
             im.save(out, format=image_format)
@@ -298,9 +279,7 @@ class ZulipUploadBackend:
 ### S3
 
 
-def get_bucket(bucket_name: str, session: Optional[Session] = None) -> ServiceResource:
-    # See https://github.com/python/typeshed/issues/2706
-    # for why this return type is a `ServiceResource`.
+def get_bucket(bucket_name: str, session: Optional[Session] = None) -> Bucket:
     if session is None:
         session = boto3.Session(settings.S3_KEY, settings.S3_SECRET_KEY)
     bucket = session.resource(
@@ -310,8 +289,7 @@ def get_bucket(bucket_name: str, session: Optional[Session] = None) -> ServiceRe
 
 
 def upload_image_to_s3(
-    # See https://github.com/python/typeshed/issues/2706
-    bucket: ServiceResource,
+    bucket: Bucket,
     file_name: str,
     content_type: Optional[str],
     user_profile: UserProfile,
@@ -387,7 +365,7 @@ class S3UploadBackend(ZulipUploadBackend):
         self.avatar_bucket = get_bucket(settings.S3_AVATAR_BUCKET, self.session)
         self.uploads_bucket = get_bucket(settings.S3_AUTH_UPLOADS_BUCKET, self.session)
 
-        self._boto_client = None
+        self._boto_client: Optional[S3Client] = None
         self.public_upload_url_base = self.construct_public_upload_url_base()
 
     def construct_public_upload_url_base(self) -> str:
@@ -430,7 +408,7 @@ class S3UploadBackend(ZulipUploadBackend):
         assert not key.startswith("/")
         return urllib.parse.urljoin(self.public_upload_url_base, key)
 
-    def get_boto_client(self) -> botocore.client.BaseClient:
+    def get_boto_client(self) -> S3Client:
         """
         Creating the client takes a long time so we need to cache it.
         """
@@ -444,7 +422,7 @@ class S3UploadBackend(ZulipUploadBackend):
             )
         return self._boto_client
 
-    def delete_file_from_s3(self, path_id: str, bucket: ServiceResource) -> bool:
+    def delete_file_from_s3(self, path_id: str, bucket: Bucket) -> bool:
         key = bucket.Object(path_id)
 
         try:
@@ -552,9 +530,7 @@ class S3UploadBackend(ZulipUploadBackend):
         self.delete_file_from_s3(path_id + "-medium.png", self.avatar_bucket)
         self.delete_file_from_s3(path_id, self.avatar_bucket)
 
-    def get_avatar_key(self, file_name: str) -> ServiceResource:
-        # See https://github.com/python/typeshed/issues/2706
-        # for why this return type is a `ServiceResource`.
+    def get_avatar_key(self, file_name: str) -> Object:
         key = self.avatar_bucket.Object(file_name)
         return key
 
@@ -713,7 +689,10 @@ class S3UploadBackend(ZulipUploadBackend):
             os.path.join("exports", secrets.token_hex(16), os.path.basename(tarball_path))
         )
 
-        key.upload_file(tarball_path, Callback=percent_callback)
+        if percent_callback is None:
+            key.upload_file(Filename=tarball_path)
+        else:
+            key.upload_file(Filename=tarball_path, Callback=percent_callback)
 
         public_url = self.get_public_upload_url(key.key)
         return public_url
@@ -767,7 +746,7 @@ LOCAL_FILE_ACCESS_TOKEN_SALT = "local_file_"
 
 def generate_unauthed_file_access_url(path_id: str) -> str:
     signed_data = TimestampSigner(salt=LOCAL_FILE_ACCESS_TOKEN_SALT).sign(path_id)
-    token = base64.b16encode(signed_data.encode("utf-8")).decode("utf-8")
+    token = base64.b16encode(signed_data.encode()).decode()
 
     filename = path_id.split("/")[-1]
     return reverse("local_file_unauthed", args=[token, filename])
@@ -776,7 +755,7 @@ def generate_unauthed_file_access_url(path_id: str) -> str:
 def get_local_file_path_id_from_token(token: str) -> Optional[str]:
     signer = TimestampSigner(salt=LOCAL_FILE_ACCESS_TOKEN_SALT)
     try:
-        signed_data = base64.b16decode(token).decode("utf-8")
+        signed_data = base64.b16decode(token).decode()
         path_id = signer.unsign(signed_data, max_age=timedelta(seconds=60))
     except (BadSignature, binascii.Error):
         return None

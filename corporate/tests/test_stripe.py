@@ -4,6 +4,7 @@ import os
 import random
 import re
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import wraps
@@ -13,7 +14,6 @@ from typing import (
     Dict,
     List,
     Mapping,
-    NamedTuple,
     Optional,
     Sequence,
     Tuple,
@@ -411,13 +411,11 @@ class StripeTestCase(ZulipTestCase):
         self.next_year = datetime(2013, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 
     def get_signed_seat_count_from_response(self, response: HttpResponse) -> Optional[str]:
-        match = re.search(
-            r"name=\"signed_seat_count\" value=\"(.+)\"", response.content.decode("utf-8")
-        )
+        match = re.search(r"name=\"signed_seat_count\" value=\"(.+)\"", response.content.decode())
         return match.group(1) if match else None
 
     def get_salt_from_response(self, response: HttpResponse) -> Optional[str]:
-        match = re.search(r"name=\"salt\" value=\"(\w+)\"", response.content.decode("utf-8"))
+        match = re.search(r"name=\"salt\" value=\"(\w+)\"", response.content.decode())
         return match.group(1) if match else None
 
     def upgrade(
@@ -2836,7 +2834,8 @@ class StripeTest(StripeTestCase):
                 invoices = self.create_invoices(customer, num_invoices)
             return realm, customer, plan, invoices
 
-        class Row(NamedTuple):
+        @dataclass
+        class Row:
             realm: Realm
             expected_plan_type: int
             plan: Optional[CustomerPlan]

@@ -28,6 +28,11 @@ class Command(ZulipBaseCommand):
             help="Send to all organization administrators of sponsored organizations.",
         )
         parser.add_argument(
+            "--marketing",
+            action="store_true",
+            help="Send to active users and realm owners with the enable_marketing_emails setting enabled.",
+        )
+        parser.add_argument(
             "--markdown-template-path",
             "--path",
             required=True,
@@ -63,6 +68,17 @@ class Command(ZulipBaseCommand):
             users = UserProfile.objects.filter(
                 is_active=True, is_bot=False, is_mirror_dummy=False, realm__deactivated=False
             )
+        elif options["marketing"]:
+            # Marketing email sent at most once to each email address for users
+            # who are recently active (!long_term_idle) users of the product.
+            users = UserProfile.objects.filter(
+                is_active=True,
+                is_bot=False,
+                is_mirror_dummy=False,
+                realm__deactivated=False,
+                enable_marketing_emails=True,
+                long_term_idle=False,
+            ).distinct("delivery_email")
         elif options["all_sponsored_org_admins"]:
             # Sends at most one copy to each email address, even if it
             # is an administrator in several organizations.
@@ -91,7 +107,13 @@ class Command(ZulipBaseCommand):
 
         # Only email users who've agreed to the terms of service.
         if settings.TOS_VERSION is not None:
-            users = users.exclude(tos_version=None)
+            # We need to do a new query because the `get_users` path
+            # passes us a list rather than a QuerySet.
+            users = (
+                UserProfile.objects.select_related()
+                .filter(id__in=[u.id for u in users])
+                .exclude(tos_version=None)
+            )
         send_custom_email(users, options)
 
         if options["dry_run"]:

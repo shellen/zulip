@@ -1286,7 +1286,7 @@ def do_deactivate_stream(
 
     # Prepend a substring of the hashed stream ID to the new stream name
     streamID = str(stream.id)
-    stream_id_hash_object = hashlib.sha512(streamID.encode("utf-8"))
+    stream_id_hash_object = hashlib.sha512(streamID.encode())
     hashed_stream_id = stream_id_hash_object.hexdigest()[0:7]
 
     new_name = (hashed_stream_id + "!DEACTIVATED:" + old_name)[: Stream.MAX_NAME_LENGTH]
@@ -2008,14 +2008,11 @@ def do_send_messages(
         else:
             user_list = list(user_ids)
 
-        UserData = TypedDict(
-            "UserData",
-            {
-                "id": int,
-                "flags": List[str],
-                "mentioned_user_group_id": Optional[int],
-            },
-        )
+        class UserData(TypedDict):
+            id: int
+            flags: List[str]
+            mentioned_user_group_id: Optional[int]
+
         users: List[UserData] = []
         for user_id in user_list:
             flags = user_flags.get(user_id, [])
@@ -3640,7 +3637,7 @@ def bulk_get_subscriber_user_ids(
         target_stream_dicts.append(stream_dict)
 
     recip_to_stream_id = {stream["recipient_id"]: stream["id"] for stream in target_stream_dicts}
-    recipient_ids = sorted([stream["recipient_id"] for stream in target_stream_dicts])
+    recipient_ids = sorted(stream["recipient_id"] for stream in target_stream_dicts)
 
     result: Dict[int, List[int]] = {stream["id"]: [] for stream in stream_dicts}
     if not recipient_ids:
@@ -5043,10 +5040,10 @@ def do_change_notification_settings(
 
     user_profile.save(update_fields=[name])
     event = {
-        "type": "update_global_notifications",
-        "user": user_profile.email,
-        "notification_name": name,
-        "setting": value,
+        "type": "user_settings",
+        "op": "update",
+        "property": name,
+        "value": value,
     }
     event_time = timezone_now()
     RealmAuditLog.objects.create(
@@ -5066,6 +5063,16 @@ def do_change_notification_settings(
 
     send_event(user_profile.realm, event, [user_profile.id])
 
+    # This legacy event format is for backwards-compatiblity with
+    # clients that don't support the new user_settings event type.
+    legacy_event = {
+        "type": "update_global_notifications",
+        "user": user_profile.email,
+        "notification_name": name,
+        "setting": value,
+    }
+    send_event(user_profile.realm, legacy_event, [user_profile.id])
+
 
 def do_set_user_display_setting(
     user_profile: UserProfile, setting_name: str, setting_value: Union[bool, str, int]
@@ -5077,7 +5084,22 @@ def do_set_user_display_setting(
         assert isinstance(setting_value, property_type)
     setattr(user_profile, setting_name, setting_value)
     user_profile.save(update_fields=[setting_name])
+
     event = {
+        "type": "user_settings",
+        "op": "update",
+        "property": setting_name,
+        "value": setting_value,
+    }
+    if setting_name == "default_language":
+        assert isinstance(setting_value, str)
+        event["language_name"] = get_language_name(setting_value)
+
+    send_event(user_profile.realm, event, [user_profile.id])
+
+    # This legacy event format is for backwards-compatiblity with
+    # clients that don't support the new user_settings event type.
+    legacy_event = {
         "type": "update_display_settings",
         "user": user_profile.email,
         "setting_name": setting_name,
@@ -5085,9 +5107,9 @@ def do_set_user_display_setting(
     }
     if setting_name == "default_language":
         assert isinstance(setting_value, str)
-        event["language_name"] = get_language_name(setting_value)
+        legacy_event["language_name"] = get_language_name(setting_value)
 
-    send_event(user_profile.realm, event, [user_profile.id])
+    send_event(user_profile.realm, legacy_event, [user_profile.id])
 
     # Updates to the timezone display setting are sent to all users
     if setting_name == "timezone":

@@ -83,7 +83,6 @@ from zerver.models import (
     get_default_stream_groups,
     get_realm,
     get_stream,
-    get_system_bot,
     get_user,
     get_user_profile_by_id_in_realm,
 )
@@ -279,7 +278,6 @@ class TestCreateStreams(ZulipTestCase):
         self.subscribe(iago, announce_stream.name)
         self.subscribe(hamlet, announce_stream.name)
 
-        notification_bot = get_system_bot(settings.NOTIFICATION_BOT, realm.id)
         self.login_user(iago)
 
         initial_message_count = Message.objects.count()
@@ -336,7 +334,6 @@ class TestCreateStreams(ZulipTestCase):
 
         # According to the code in zerver/views/streams/add_subscriptions_backend
         # the notification stream message is sent first, then the new stream's message.
-        self.assertEqual(hamlet_unread_messages[0]["sender_ids"][0], notification_bot.id)
         self.assertEqual(hamlet_unread_messages[1]["stream_id"], stream_id)
 
         # But it should be marked as read for Iago, the stream creator.
@@ -1207,7 +1204,7 @@ class StreamAdminTest(ZulipTestCase):
         with self.tornado_redirected_to_list(events, expected_num_events=1):
             result = self.client_patch(
                 f"/json/streams/{stream.id}",
-                {"message_retention_days": orjson.dumps("forever").decode()},
+                {"message_retention_days": orjson.dumps("unlimited").decode()},
             )
         self.assert_json_success(result)
         event = events[0]["event"]
@@ -1395,7 +1392,7 @@ class StreamAdminTest(ZulipTestCase):
 
         # A deleted stream's name is changed, is deactivated, is invite-only,
         # and has no subscribers.
-        hashed_stream_id = hashlib.sha512(str(stream_id).encode("utf-8")).hexdigest()[0:7]
+        hashed_stream_id = hashlib.sha512(str(stream_id).encode()).hexdigest()[0:7]
         deactivated_stream_name = hashed_stream_id + "!DEACTIVATED:" + active_name
         deactivated_stream = get_stream(deactivated_stream_name, realm)
         self.assertTrue(deactivated_stream.deactivated)
@@ -2965,7 +2962,7 @@ class SubscriptionAPITest(ZulipTestCase):
 
         expected_stream_ids = {get_stream(stream, self.test_realm).id for stream in add_streams}
 
-        (peer_add_event,) = [event for event in events if event["event"].get("op") == "peer_add"]
+        (peer_add_event,) = (event for event in events if event["event"].get("op") == "peer_add")
 
         self.assertEqual(set(peer_add_event["event"]["stream_ids"]), expected_stream_ids)
         self.assertEqual(set(peer_add_event["event"]["user_ids"]), {self.test_user.id})

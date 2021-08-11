@@ -6,7 +6,7 @@ const _ = require("lodash");
 
 const {zrequire} = require("../zjsunit/namespace");
 const {run_test} = require("../zjsunit/test");
-const {page_params} = require("../zjsunit/zpage_params");
+const {page_params, user_settings} = require("../zjsunit/zpage_params");
 
 page_params.realm_push_notifications_enabled = false;
 
@@ -43,13 +43,13 @@ function assert_zero_counts(counts) {
 }
 
 function test_notifiable_count(home_unread_messages, expected_notifiable_count) {
-    page_params.desktop_icon_count_display = 1;
+    user_settings.desktop_icon_count_display = 1;
     let notifiable_counts = unread.get_notifiable_count();
     assert.deepEqual(notifiable_counts, home_unread_messages);
-    page_params.desktop_icon_count_display = 2;
+    user_settings.desktop_icon_count_display = 2;
     notifiable_counts = unread.get_notifiable_count();
     assert.deepEqual(notifiable_counts, expected_notifiable_count);
-    page_params.desktop_icon_count_display = 3;
+    user_settings.desktop_icon_count_display = 3;
     notifiable_counts = unread.get_notifiable_count();
     assert.deepEqual(notifiable_counts, 0);
 }
@@ -99,6 +99,7 @@ test("changing_topics", () => {
         unread: true,
     };
 
+    assert.deepEqual(unread.get_read_message_ids([15, 16]), [15, 16]);
     assert.deepEqual(unread.get_unread_message_ids([15, 16]), []);
     assert.deepEqual(unread.get_unread_messages([message, other_message]), []);
 
@@ -111,6 +112,7 @@ test("changing_topics", () => {
     unread.process_loaded_messages([message, other_message]);
 
     assert.deepEqual(unread.get_all_msg_ids(), [15, 16]);
+    assert.deepEqual(unread.get_read_message_ids([15, 16]), []);
     assert.deepEqual(unread.get_unread_message_ids([15, 16]), [15, 16]);
     assert.deepEqual(unread.get_unread_messages([message, other_message]), [
         message,
@@ -510,31 +512,49 @@ test("mentions", () => {
         unread: true,
     };
 
+    const muted_direct_mention_message = {
+        id: 17,
+        type: "stream",
+        stream_id: muted_stream_id,
+        topic: "lunch",
+        mentioned: true,
+        mentioned_me_directly: true,
+        unread: true,
+    };
+
     unread.process_loaded_messages([
         already_read_message,
         mention_me_message,
         mention_all_message,
         muted_mention_all_message,
+        muted_direct_mention_message,
     ]);
 
     counts = unread.get_counts();
-    assert.equal(counts.mentioned_message_count, 2);
+    assert.equal(counts.mentioned_message_count, 3);
     assert.deepEqual(unread.get_msg_ids_for_mentions(), [
         mention_me_message.id,
         mention_all_message.id,
+        muted_direct_mention_message.id,
     ]);
     assert.deepEqual(unread.get_all_msg_ids(), [
         mention_me_message.id,
         mention_all_message.id,
         muted_mention_all_message.id,
     ]);
-    test_notifiable_count(counts.home_unread_messages, 2);
+    test_notifiable_count(counts.home_unread_messages, 3);
 
     unread.mark_as_read(mention_me_message.id);
     unread.mark_as_read(mention_all_message.id);
+    unread.mark_as_read(muted_direct_mention_message.id);
     counts = unread.get_counts();
     assert.equal(counts.mentioned_message_count, 0);
     test_notifiable_count(counts.home_unread_messages, 0);
+
+    // redundantly read a message to make sure nothing explodes
+    unread.mark_as_read(muted_direct_mention_message.id);
+    counts = unread.get_counts();
+    assert.equal(counts.mentioned_message_count, 0);
 });
 
 test("mention updates", () => {

@@ -547,6 +547,32 @@ class FetchInitialStateDataTest(ZulipTestCase):
             else:
                 self.assertFalse("avatar_url" in user_dict)
 
+    def test_user_settings_based_on_client_capabilities(self) -> None:
+        hamlet = self.example_user("hamlet")
+        result = fetch_initial_state_data(
+            user_profile=hamlet,
+            user_settings_object=True,
+        )
+        self.assertIn("user_settings", result)
+        for prop in UserProfile.property_types:
+            self.assertNotIn(prop, result)
+            self.assertIn(prop, result["user_settings"])
+        for prop in UserProfile.notification_setting_types:
+            self.assertNotIn(prop, result)
+            self.assertIn(prop, result["user_settings"])
+
+        result = fetch_initial_state_data(
+            user_profile=hamlet,
+            user_settings_object=False,
+        )
+        self.assertIn("user_settings", result)
+        for prop in UserProfile.property_types:
+            self.assertIn(prop, result)
+            self.assertIn(prop, result["user_settings"])
+        for prop in UserProfile.notification_setting_types:
+            self.assertIn(prop, result)
+            self.assertIn(prop, result["user_settings"])
+
 
 class ClientDescriptorsTest(ZulipTestCase):
     def test_get_client_info_for_all_public_streams(self) -> None:
@@ -1013,6 +1039,7 @@ class FetchQueriesTest(ZulipTestCase):
             update_display_settings=0,
             update_global_notifications=0,
             update_message_flags=5,
+            user_settings=0,
             user_status=1,
             video_calls=0,
             giphy=0,

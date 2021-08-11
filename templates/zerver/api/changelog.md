@@ -11,6 +11,50 @@ below features are supported.
 
 ## Changes in Zulip 5.0
 
+**Feature level 92**
+
+* [`GET /messages`](/api/get-messages), [`POST
+  /register`](/api/register-queue), [`GET /users`](/api/get-users),
+  [`GET /users/{user_id}`](/api/get-user), [`GET
+  /users/{email}`](/api/get-user-by-email): The `client_gravatar`
+  parameter now defaults to `true`.
+
+**Feature level 91**
+
+* `PATCH /realm`, [`PATCH /streams/{stream_id}`](/api/update-stream):
+  These endpoints now accept `"unlimited"` for `message_retention_days`,
+  replacing `"forever"` as the way to encode a retention policy where
+  messages are not automatically deleted.
+
+**Feature level 90**
+
+* [`POST /register`](/api/register-queue): The `unread_msgs` section
+  of the response no longer includes `sender_ids` in the `streams`
+  dictionaries. These were removed because no clients were interested
+  in using the data, which required substantial complexity to
+  construct correctly.
+
+**Feature level 89**
+
+* [`GET /events`](/api/get-events): Introduced the `user_settings`
+  event type, unifying and replacing the previous
+  `update_display_settings` and `update_global_notifications` event
+  types. The legacy event types are still supported for backwards
+  compatibility, but will be removed in a future release.
+* [`POST /register`](/api/register-queue): Added `user_settings` field
+  in the response, which is a dictionary containing all the user's
+  personal settings. For backwards-compatibility, individual settings
+  will still appear in the top-level response for clients don't
+  support the `user_settings_object` client capability.
+* [`POST /register`](/api/register-queue): Added the
+  `user_settings_object` property to supported `client_capabilities`.
+  When enabled, the server will not include a duplicate copy of
+  personal settings in the top-level response.
+* [`GET /events`](/api/get-events): `update_display_settings` and
+  `update_global_notifications` events now only sent to clients that
+  did not include `user_settings_object` in their
+  `client_capabilities` when the event queue was created.
+
 **Feature level 88**
 
 * [`POST /register`](/api/register-queue): Added `zulip_merge_base`
@@ -142,7 +186,7 @@ below features are supported.
 
 * [`GET /users`](/api/get-users), [`GET /users/{user_id}`](/api/get-user),
   [`GET /users/{email}`](/api/get-user-by-email) and
-  [`GET /users/me`](/api/get-own-user): Added `is_billing_admin` field to
+  [`GET /users/me`](/api/get-own-user): Added is `user_billing_admin` field to
   returned user objects.
 * [`GET /events`](/api/get-events): Added `is_billing_admin` field to
   user objects sent in `realm_user` events.

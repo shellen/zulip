@@ -6,6 +6,7 @@ import * as people from "./people";
 import * as settings_config from "./settings_config";
 import * as stream_data from "./stream_data";
 import * as sub_store from "./sub_store";
+import {user_settings} from "./user_settings";
 import * as util from "./util";
 
 // The unread module tracks the message IDs and locations of the
@@ -118,12 +119,11 @@ class UnreadPMCounter {
         }
     }
 
-    add(message) {
-        const user_ids_string = people.pm_reply_user_string(message);
+    add({message_id, user_ids_string}) {
         if (user_ids_string) {
             this.bucketer.add({
                 bucket_key: user_ids_string,
-                item_id: message.id,
+                item_id: message_id,
             });
         }
     }
@@ -211,20 +211,20 @@ class UnreadTopicCounter {
             const topic = obj.topic;
             const unread_message_ids = obj.unread_message_ids;
 
-            for (const msg_id of unread_message_ids) {
-                this.add(stream_id, topic, msg_id);
+            for (const message_id of unread_message_ids) {
+                this.add({message_id, stream_id, topic});
             }
         }
     }
 
-    add(stream_id, topic, msg_id) {
+    add({message_id, stream_id, topic}) {
         this.bucketer.add({
             bucket_key: stream_id,
-            item_id: msg_id,
+            item_id: message_id,
             add_callback(per_stream_bucketer) {
                 per_stream_bucketer.add({
                     bucket_key: topic,
-                    item_id: msg_id,
+                    item_id: message_id,
                 });
             },
         });
@@ -397,6 +397,10 @@ export function message_unread(message) {
     return message.unread;
 }
 
+export function get_read_message_ids(message_ids) {
+    return message_ids.filter((message_id) => !unread_messages.has(message_id));
+}
+
 export function get_unread_message_ids(message_ids) {
     return message_ids.filter((message_id) => unread_messages.has(message_id));
 }
@@ -419,27 +423,56 @@ export function update_unread_topics(msg, event) {
 
     unread_topic_counter.delete(msg.id);
 
-    unread_topic_counter.add(new_stream_id || msg.stream_id, new_topic || msg.topic, msg.id);
+    unread_topic_counter.add({
+        message_id: msg.id,
+        stream_id: new_stream_id || msg.stream_id,
+        topic: new_topic || msg.topic,
+    });
 }
 
 export function process_loaded_messages(messages) {
     for (const message of messages) {
-        if (!message.unread) {
-            continue;
+        if (message.unread) {
+            const user_ids_string =
+                message.type === "private" ? people.pm_reply_user_string(message) : undefined;
+
+            process_unread_message({
+                id: message.id,
+                mentioned: message.mentioned,
+                mentioned_me_directly: message.mentioned_me_directly,
+                stream_id: message.stream_id,
+                topic: message.topic,
+                type: message.type,
+                unread: true,
+                user_ids_string,
+            });
         }
-
-        unread_messages.add(message.id);
-
-        if (message.type === "private") {
-            unread_pm_counter.add(message);
-        }
-
-        if (message.type === "stream") {
-            unread_topic_counter.add(message.stream_id, message.topic, message.id);
-        }
-
-        update_message_for_mention(message);
     }
+}
+
+function process_unread_message(message) {
+    // The `message` here just needs to require certain fields. For example,
+    // the "message" may actually be constructed from a Zulip event that doesn't
+    // include fields like "content".  The caller must verify that the message
+    // is actually unread--we don't defend against that.
+    unread_messages.add(message.id);
+
+    if (message.type === "private") {
+        unread_pm_counter.add({
+            message_id: message.id,
+            user_ids_string: message.user_ids_string,
+        });
+    }
+
+    if (message.type === "stream") {
+        unread_topic_counter.add({
+            message_id: message.id,
+            stream_id: message.stream_id,
+            topic: message.topic,
+        });
+    }
+
+    update_message_for_mention(message);
 }
 
 export function update_message_for_mention(message) {
@@ -509,10 +542,10 @@ export function calculate_notifiable_count(res) {
     let new_message_count = 0;
 
     const only_show_notifiable =
-        page_params.desktop_icon_count_display ===
+        user_settings.desktop_icon_count_display ===
         settings_config.desktop_icon_count_display_values.notifiable.code;
     const no_notifications =
-        page_params.desktop_icon_count_display ===
+        user_settings.desktop_icon_count_display ===
         settings_config.desktop_icon_count_display_values.none.code;
     if (only_show_notifiable) {
         // DESKTOP_ICON_COUNT_DISPLAY_NOTIFIABLE
