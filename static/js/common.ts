@@ -6,9 +6,14 @@ import {$t} from "./i18n";
 
 export const status_classes = "alert-error alert-success alert-info alert-warning";
 const inquiry_template = "Q: QUESTION_HERE\n* A1: FIRST_ANSWER\n* A2: SECOND_ANSWER\n\ndata source: URLHERE\nother-details: \ndeadline: YYYY-MM-DD HH:MM:SS EST\n\n";
+export const forecast_template = "My latest forecast: (delete this to not make one)\n";
 
 export function prefix_with_inquiry(elem: JQuery): void {
     elem.val(inquiry_template + elem.val());
+}
+
+export function prefix_with_forecast(elem: JQuery): void {
+    elem.val(forecast_template + elem.val());
 }
 
 // TODO: Move this to the portico codebase.
