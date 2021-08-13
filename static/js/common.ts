@@ -12,10 +12,6 @@ export function prefix_with_inquiry(elem: JQuery): void {
     elem.val(inquiry_template + elem.val());
 }
 
-export function prefix_with_forecast(elem: JQuery): void {
-    elem.val(forecast_template + elem.val());
-}
-
 // TODO: Move this to the portico codebase.
 export function autofocus(selector: string): void {
     $(() => {

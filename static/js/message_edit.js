@@ -603,7 +603,7 @@ function edit_message(row, raw_content) {
         message_edit_topic_propagate.toggle(is_topic_edited || is_stream_edited);
         message_edit_breadcrumb_messages.toggle(is_stream_edited);
 	const contents = message_edit_content.val();
-	if (new_topic.startsWith("inquiry:") && !contents.startsWith("Q:")) {
+	if (new_topic.startsWith("inquiry:") && !contents.match(/(<p>)?Q: /)) {
 	    prefix_with_inquiry(message_edit_content);
 	}
     }
