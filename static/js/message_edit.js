@@ -8,6 +8,7 @@ import render_topic_edit_form from "../templates/topic_edit_form.hbs";
 
 import * as blueslip from "./blueslip";
 import * as channel from "./channel";
+import {prefix_with_inquiry} from "./common";
 import * as compose from "./compose";
 import * as compose_actions from "./compose_actions";
 import * as compose_ui from "./compose_ui";
@@ -601,6 +602,10 @@ function edit_message(row, raw_content) {
         const is_stream_edited = is_stream_editable ? new_stream_id !== original_stream_id : false;
         message_edit_topic_propagate.toggle(is_topic_edited || is_stream_edited);
         message_edit_breadcrumb_messages.toggle(is_stream_edited);
+	const contents = message_edit_content.val();
+	if (new_topic.startsWith("inquiry:") && !contents.startsWith("Q:")) {
+	    prefix_with_inquiry(message_edit_content);
+	}
     }
 
     if (!message.locally_echoed) {
