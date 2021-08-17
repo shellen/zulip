@@ -101,18 +101,23 @@ def send_initial_pms(user: UserProfile) -> None:
     content = """
 Welcome!  Some things to know:
 
-1. **we're all professionals**, including a number of very successful/wealthy people - assume people know what they're talking about. Be respectful or admins will warn then boot.
+1. **smart folks you can respect**.
+*~*Everybody came by referral and has some area(s) of deep expertise.*~*
 
-2. **anonymous/throwaway accounts are fine**; no [doxxing](https://www.google.com/search?q=doxxing); we're open-minded, that's the point of this place. If you need more account(s) just send @**Massy Ghausi** or @**Adam Sah** the email(s) you'd like to invite.
+2. **anonymous accounts are OK / no [doxxing](https://www.google.com/search?q=doxxing)**.
+*~*If you need more account(s), message @**Massy Ghausi** or @**Adam Sah** *~* *~*with the email(s) you'd like to invite.*~*
 
-3. **use percentages** when discussing personal finances, e.g. I'm 4% USD, etc. We assume everyone here has enough money that whole numbers don't matter.
+3. **use percentages**.
+*~*For privacy and respect, please use percentages to discuss personal finances, e.g. I'm 4% USD, etc.*~* *~*We assume everyone has plenty of capital.*~*
 
-4. **we're using [Zulip](zulip.com)** which is like Slack but has one extra "level" of hierarchy - Slack channels are called "streams" and underneath are "topics" [learn more](https://zulip.com/help/about-streams-and-topics)
+4. **channels/streams and topics (sub-streams)**.
+*~*This site is based on [Zulip](zulip.com), which is similar to Slack/etc but with extra "level." [learn more](https://zulip.com/help/about-streams-and-topics) *~*
 
-5. **inquiries** and other custom features: forecast.chat adds "inquiries" to Zulip, which are like a simple prediction market. Over time, if this becomes popular, we'll add more. We don't recommend the Zulip mobile or desktop apps because they don't (yet) contain our customizations - the web version works well on cellphones.
+5. **inquiries**.
+*~*We modified Zulip to add "inquiries" as a simple type of [prediction market](https://www.google.com/search?q=prediction+market). More coming...*~*
 
-6. **getting help**: post [here](https://forecast.chat/#narrow/stream/6-suggestions.3A-site.20features/topic/help.20me.20!) or send a PM to @**Massy Ghausi** or @**Adam Sah** - we need the feedback!
-
+6. **getting help**:
+*~*post [here](https://forecast.chat/#narrow/stream/6-suggestions.3A-site.20features/topic/help.20me.20!) or send a PM to @**Massy Ghausi** or @**Adam Sah** - we need the feedback!*~*
 """
 
     internal_send_private_message(
