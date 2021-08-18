@@ -212,10 +212,6 @@
         font-weight: 600;
     }
 
-    small {
-        font-weight: 300;
-    }
-
     img {
         vertical-align: top;
         box-shadow: 0 0 4px hsla(0, 0%, 0%, 0.05);

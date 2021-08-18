@@ -73,6 +73,11 @@ a {
     }
 }
 
+small {
+    font-weight: 400;
+    font-size: 80%;
+}
+
 code,
 pre {
     font-family: "Source Code Pro", monospace;

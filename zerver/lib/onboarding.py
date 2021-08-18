@@ -102,22 +102,22 @@ def send_initial_pms(user: UserProfile) -> None:
 Welcome!  Some things to know:
 
 1. **smart folks you can respect**.
-*~*Everybody came by referral and has some area(s) of deep expertise.*~*
+**~*Everybody came by referral and has some area(s) of deep expertise.*~**
 
 2. **anonymous accounts are OK / no [doxxing](https://www.google.com/search?q=doxxing)**.
-*~*If you need more account(s), message @**Massy Ghausi** or @**Adam Sah** *~* *~*with the email(s) you'd like to invite.*~*
+**~*If you need more account(s), message @**Massy Ghausi** or @**Adam Sah***~**~*with the email(s) you'd like to invite.*~**
 
 3. **use percentages**.
-*~*For privacy and respect, please use percentages to discuss personal finances, e.g. I'm 4% USD, etc.*~* *~*We assume everyone has plenty of capital.*~*
+**~*For privacy and respect, please use percentages to discuss personal finances, e.g. I'm 4% USD, etc.*~**~*We assume everyone has plenty of capital.*~**
 
-4. **channels/streams and topics (sub-streams)**.
-*~*This site is based on [Zulip](zulip.com), which is similar to Slack/etc but with extra "level." [learn more](https://zulip.com/help/about-streams-and-topics) *~*
+4. **streams and topics**. Please learn about them.
+**~*This site is based on [Zulip](zulip.com), which is similar to Slack/etc but with extra "level." [learn more](https://zulip.com/help/about-streams-and-topics) *~**
 
-5. **inquiries**.
-*~*We modified Zulip to add "inquiries" as a simple type of [prediction market](https://www.google.com/search?q=prediction+market). More coming...*~*
+5. **inquiries** and other forecast features.
+**~*We modified Zulip to add "inquiries" as a simple type of [prediction market](https://www.google.com/search?q=prediction+market). More coming...*~**
 
-6. **getting help**:
-*~*post [here](https://forecast.chat/#narrow/stream/6-suggestions.3A-site.20features/topic/help.20me.20!) or send a PM to @**Massy Ghausi** or @**Adam Sah** - we need the feedback!*~*
+6. **get help** early and often!
+**~*Post [here](https://forecast.chat/#narrow/stream/6-suggestions.3A-site.20features/topic/help.20me.20!) or send a PM to @**Massy Ghausi** or @**Adam Sah** - we need the feedback!*~**
 """
 
     internal_send_private_message(
