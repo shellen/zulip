@@ -206,16 +206,27 @@ export function handle_keydown(event, textarea) {
     const isBold = key === "b";
     const isItalic = key === "i" && !event.shiftKey;
     const isLink = key === "l" && event.shiftKey;
+    const isLight = key === "l" && !event.shiftKey;
 
     // detect Cmd and Ctrl key
     const isCmdOrCtrl = common.has_mac_keyboard() ? event.metaKey : event.ctrlKey;
 
-    if ((isBold || isItalic || isLink) && isCmdOrCtrl) {
+    if ((isBold || isItalic || isLink || isLight) && isCmdOrCtrl) {
         const range = textarea.range();
 
         if (isBold) {
             // Ctrl + B: Convert selected text to bold text
             wrap_text_with_markdown(textarea, "**", "**");
+            event.preventDefault();
+
+            if (!range.length) {
+                textarea.caret(textarea.caret() - 2);
+            }
+        }
+
+        if (isLight) {
+            // Ctrl + B: Convert selected text to bold text
+            wrap_text_with_markdown(textarea, "*~*", "*~*");
             event.preventDefault();
 
             if (!range.length) {
