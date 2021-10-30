@@ -103,7 +103,8 @@ def enqueue_emails(cutoff: datetime.datetime) -> None:
 
     weekday = timezone_now().weekday()
     for realm in Realm.objects.filter(
-        deactivated=False, digest_emails_enabled=True, digest_weekday=weekday
+        deactivated=False, digest_emails_enabled=True, # send every day
+        #deactivated=False, digest_emails_enabled=True, digest_weekday=weekday
     ):
         if should_process_digest(realm.string_id):
             _enqueue_emails_for_realm(realm, cutoff)
