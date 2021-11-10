@@ -227,26 +227,25 @@ a.button:hover {
 
 .messages {
     width: 600px;
-    font-size: 12px;
+    font-size: 14px;
     font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
     overflow-y: auto;
 }
 
 .hot_convo_recipient_block {
-    border: 1px solid #000;
-    margin-bottom: 4px;
+    line-height: 150%;
+    margin-top: 3px;;
 }
 
 .hot_convo_recipient_header {
-    background-color: #9ec9ff;
-    border-bottom: 1px solid #000;
-    font-weight: bold;
-    padding: 2px;
+    padding: 4px;
+    border-radius: 6px;
+    padding-left: 6px;
 }
 
 .hot_convo_message_content {
-    margin-left: 1px;
-    margin-right: 2px;
+/*    margin-left: 1px;
+    margin-right: 2px; */
 }
 
 .hot_convo_message_sender {
@@ -293,7 +292,29 @@ a.button:hover {
 
 .hot_convo_message_content_block {
     padding-left: 6px;
-    font-weight: normal;
+    margin-top: 6px
+}
+
+.moremessages {
+    font-size: 12px;
+    padding-top: 4px;
+    padding-left: 6px;
+    float: right;
+    color: blue;
+}
+
+.timestamp {
+    color: rgb(61, 61, 61);
+    font-size: 12px;
+}
+.poster_header {
+    margin: 0;
+    padding: 0;
+}
+
+.mailfooter {
+    font-family: "Helvetica Neue", Helvetica, Arial, Helvetica, sans-serif;
+    font-size: 12px;
 }
 
 .email-preferences {
