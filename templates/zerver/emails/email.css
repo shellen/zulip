@@ -234,13 +234,14 @@ a.button:hover {
 
 .hot_convo_recipient_block {
     line-height: 150%;
-    margin-top: 3px;;
+    margin-top: 3px;
 }
 
 .hot_convo_recipient_header {
     padding: 4px;
     border-radius: 6px;
     padding-left: 6px;
+    background-color: #9ec9ff;
 }
 
 .hot_convo_message_content {
@@ -272,14 +273,14 @@ a.button:hover {
 
 .recipient_block_without_messages {
     background-color: #f0f4f5;
-    border: 1px solid #000;
+/*     border: 1px solid #000; */
     margin-bottom: 4px;
 }
 
 .recipient_header_without_messages {
     color: #fff;
     background-color: #444;
-    border-bottom: 1px solid #000;
+/*    border-bottom: 1px solid #000; */
     font-weight: bold;
     padding: 2px;
 }
